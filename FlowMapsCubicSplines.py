@@ -11,9 +11,9 @@
 
 """
 This script draws flow maps for rendering in a GIS. It does this by drawing
-the geodesic arcs between origins and destinations, with cubic spline
-interpolation with an across-track point. This module depends on GDAL/OGR,
-nvector, and scipy, each of which is freely available and open-source.
+the cubic splines between origins and destinations in the output coordinate system,
+combined with an across-track point. This module depends on GDAL/OGR,
+pyproj, shapely, and scipy, each of which is freely available and open-source.
 
 You must supply the script with a csv file where each row represents an arc
 with a flow magnitude. Specific information about the required format of that
@@ -26,6 +26,7 @@ Python 3.4
 scipy 0.18.1
 gdal 2.1.0
 shapely 1.5.17.post1
+pyproj 1.9.5.1
 
 Please feel free to contact the author, Dr. Paulo Raposo, at
 pauloj.raposo@outlook.com. Thanks for your interest!
@@ -34,17 +35,21 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 
 """
 
-progName = "Spline Flows"
-__version__ = "0.1"
+dependencies = """Python 3
+scipy
+gdal
+shapely
+pyproj (Proj.4)"""
 
 sf = """
   __                   ___
  (_ ` _   ) o  _   _   )_  ) _         _ |
 .__) )_) (  ( ) ) )_) (   ( (_) )_)_) (  o
     (            (_                   _)
-
-
 """
+
+progName = "Spline Flows"
+__version__ = "0.1, June 2017"
 
 license = """
 # Under MIT License:
@@ -74,6 +79,10 @@ license = """
 
 # Notes /////////////////////////////////////////////////////////////////////////////
 
+# TODO: investigate +ellps and +datum proj4 strings for pyproj. I think when both are
+# supplied it throws an error. Should be able to prevent that; if datum is given, ellipse
+# doesn't need to be since it's implied.
+
 # OGC WKT for Azimuthal Equidistant projection on North Pole (from http://spatialreference.org/ref/esri/102016/):  PROJCS["North_Pole_Azimuthal_Equidistant",GEOGCS["GCS_WGS_1984",DATUM["WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Azimuthal_Equidistant"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Latitude_Of_Origin",90],UNIT["Meter",1],AUTHORITY["EPSG","102016"]]
 # NB - 102016 not recognized at http://www.epsg-registry.org
 
@@ -91,6 +100,15 @@ license = """
 
 # Imports ///////////////////////////////////////////////////////////////////////////
 
+try:
+    import pyproj
+    from pyproj import Proj
+except ImportError:
+    print("""This script depends on the pyproj library, which isn't installed in
+    this Pyhon environment. Please install the library or use an environment with
+    it installed.
+    Exiting.""")
+    exit()
 try:
     import osgeo
     from osgeo import ogr, gdal, osr
@@ -121,7 +139,7 @@ except ImportError:
     Exiting.""")
     exit()
 
-import os, csv, argparse, math # all standard libraries in Python.
+import os, csv, argparse, math, re
 from urllib import request
 import numpy as np
 # import datetime, logging
@@ -179,6 +197,18 @@ def gdal_error_handler(err_class, err_num, err_msg):
     print('Error Type: %s' % (err_class))
     print('Error Message: %s' % (err_msg))
 
+def stripUnitFlagFromProj4(p4string):
+    """Removes the ''+units=m' flag from a Proj4 string, since that seems to trip pyproj up. Argh."""
+    flags = p4string.split(" ") # I think spaces are always required in the Proj4 strings, as well as "+"
+    filteredFlags = []
+    for f in flags:
+        exp = re.compile("\+units=")
+        if not exp.match(f):
+            filteredFlags.append(f)
+    outstring = " ".join(filteredFlags)
+    print("String returned: " + outstring)
+    return outstring
+
 class LicenseAction(argparse.Action):
     def __init__(self, nargs=0, **kw):
         super().__init__(nargs=nargs, **kw)
@@ -193,76 +223,86 @@ def main():
     """The main method of this script, for making flow maps, hot and fresh
      to your table, all flowy and map-like - that's amore!"""
 
-    # Set up error handler for GDAL
-    gdal.PushErrorHandler(gdal_error_handler)
+    # Constants, defaults, etc. /////////////////////////////////////////////////////////
 
-    # Web Mercator as wkt string.
-    webMercatorRefURL = "http://spatialreference.org/ref/sr-org/45/"
-    webMercator = """PROJCS["WGS_1984_Web_Mercator",GEOGCS["GCS_WGS_1984_Major_Auxiliary_Sphere",DATUM["WGS_1984_Major_Auxiliary_Sphere",SPHEROID["WGS_1984_Major_Auxiliary_Sphere",6378137.0,0.0]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Mercator_1SP"],PARAMETER["False_Easting",0.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",0.0],PARAMETER["latitude_of_origin",0.0],UNIT["Meter",1.0]]"""
-    wmSR = osr.SpatialReference()
-    wmSR.ImportFromWkt(webMercator)
-
-    # WGS84 as wkt string.
-    wgs84RefURL = "http://spatialreference.org/ref/epsg/4326/"
-    wgs84_wkt = """GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.01745329251994328,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]]"""
+    # EPSG:4326 WGS 84 - for required input.
+    wgs84RefURL = "http://spatialreference.org/ref/epsg/4326/" # Retrieved string below 2017-06-01
+    epsgWGS84Proj4 = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
     wgs84SR = osr.SpatialReference()
-    wgs84SR.ImportFromWkt(wgs84_wkt)
+    wgs84SR.ImportFromProj4(epsgWGS84Proj4)
+
+    # EPSG:3785 Web Mercator - for default output.
+    webMercatorRefURL = "http://spatialreference.org/ref/epsg/3785/" # Retrieved string below 2017-06-01
+    epsgWebMercProj4 = "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378137 +b=6378137 +towgs84=0,0,0,0,0,0,0 +no_defs" # manually removed +units=m
+    wmSR = osr.SpatialReference()
+    wmSR.ImportFromProj4(epsgWebMercProj4)
 
     # Output field names
     textFieldNames = ["Orig", "Dest"]
     floatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon"]
 
-    # Constants, defaults, etc.
-    outSR = wmSR
+    outP4 = epsgWebMercProj4
     leftHanded = True
     fractionOfPath = 0.5 # TODO: add ability to move the curvature apex along the route.
     vertsPerArc = 200
     devFraction = 0.15
     # devFraction = (1.0 / golden) # For the Golden Ratio, phi.
 
+    # Set up error handler for GDAL
+    gdal.PushErrorHandler(gdal_error_handler)
+
     # Parse command line arguments
-    helpString = sf + "A script for making flow maps in GIS, using cubic splines.\nWritten for Python 3 (may not work on 2).\nWritten by Paulo Raposo (pauloj.raposo@outlook.com).\nUnder MIT license."
+    helpString = sf + "A script for making flow maps in GIS, using cubic splines,\nby Paulo Raposo (pauloj.raposo@outlook.com).\nWritten for Python 3 - may not work on 2.\nUnder MIT license.\n\nDependencies include:\n" + dependencies
     parser = argparse.ArgumentParser(prog = progName, description = helpString, formatter_class = argparse.RawDescriptionHelpFormatter)
     parser.add_argument("ROUTES", help = "CSV file specifying routes and magnitudes. Coordinates must be lat and lon in WGS84. Please see the README file for required formatting.")
     parser.add_argument("OUTSHPFILE", help = "File path and name for output shapefile, with extension '.shp'. The directory must already exist.")
-    parser.add_argument("--outwkt", help = "Output projected coordinate system to draw flow arcs in, given as an OGC well-known text (WKT) string. Available at spatialreference.org. Three formats are acceptable: a WKT string, a URL starting with 'http://' to the OGC WKT for a coodinate system on spatialreference.org (e.g., http://spatialreference.org/ref/esri/53009/ogcwkt/), or a full path to a plain text file containing (only) a WKT string. Default output projection is Web Mercator, as per " + webMercatorRefURL + ".")
-    parser.add_argument("--dev", help = "The fraction of the straight-line distance between start and end points of each arc that a third, deviated point should be established for cubic splines. Values must be between 0.0 and 1.0. Larger values make arcs more curved. Default is 0.15.")
+    parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'http://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., http://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing (only) a Proj.4 string. Default output projection is Web Mercator (" + webMercatorRefURL + ").")
+    parser.add_argument("--dev", help = "The fraction of the projected straight-line distance between start and end points of each arc at which a third, across-track deviated point should be established for cubic splines. Values must be between 0.0 and 1.0. Larger values make arcs more curved. Default is 0.15.")
     parser.add_argument("--vpa", help = "The number of vertices the mapped arcs should each have. Must be greater than 3, but should be at least several dozen to a couple hundred or so. Default is " + str(vertsPerArc) + ".")
-    parser.add_argument("--rh", default = False, action = "store_true",  help = "A flag for making the dev point on the right-hand side instead of left. Changes the directions that arcs curve in.")
+    parser.add_argument("--rh", default = False, action = "store_true",  help = "Sets the across-track deviation point on the right-hand side instead of left. Changes the directions that arcs curve in.")
     parser.add_argument("-v", "--version", action = "version", version = "%(prog)s " + __version__)
     parser.add_argument("-l", "--license", action = LicenseAction, nargs = 0, help = "Print the script's license and exit.")
     #
     args = parser.parse_args()
     if args.vpa:
         vertsPerArc = args.vpa
-    if args.outwkt:
-        specifiedSR = osr.SpatialReference()
-        wkt = None
-        if args.outwkt.startswith("http://"):
+    if args.outproj4:
+        # specifiedSR = osr.SpatialReference()
+        # wkt = None
+        if args.outproj4.startswith("http://"):
             # URL
-            f = request.urlopen(args.outwkt)
-            print(f.read().decode("utf-8"))
-            wkt = f.read().decode("utf-8") # decode from byte string.
+            f = request.urlopen(args.outproj4)
+            # str(bytes_string,'utf-8')
+            print(str(f.read(), "utf-8"))#.decode("utf-8"))
+            # wkt = f.read().decode("utf-8") # decode from byte string.
+            outP4 = stripUnitFlagFromProj4( str(f.read(), "utf-8") )#  f.read().decode("utf-8") # decode from byte string.
             print("Setting output SR from URL.")
-        elif os.path.exists(args.outwkt):
+        elif os.path.exists(args.outproj4):
             # Assuming a path to a text file has been passed in
-            f = open(args.outwkt)
-            wkt = f.read()
+            f = open(args.outproj4)
+            # wkt = f.read()
+            outP4 = stripUnitFlagFromProj4( f.read() )
             f.close()
         else:
-            # WKT string
-            wkt = args.outwkt
-        specifiedSR.ImportFromWkt(wkt)
-        outSR = specifiedSR
+            # Proj.4 string
+            outP4 = stripUnitFlagFromProj4( args.outproj4 )
+            # wkt = args.outwkt
+        # specifiedSR.ImportFromWkt(wkt)
+        # outSR = specifiedSR
+
     if args.dev:
         devFraction = float(args.dev)
     if args.rh:
         leftHanded = False
 
-    # Build the necessary outbound coordinate transform
-    outboundTransform = osr.CoordinateTransformation(wgs84SR, outSR)
+    # outboundTransform = osr.CoordinateTransformation(wgs84SR, outSR)
+    # print("Outbound spatial reference is projected? " + str(outSR.IsProjected()))
 
-    print("is projected? " + str(outSR.IsProjected()))
+    # Build the necessary coordinate systems for Proj.4, and the output prj file
+    pIn = Proj(epsgWGS84Proj4)
+    pOut = Proj(outP4)
+    outSR = osr.SpatialReference()
+    outSR.ImportFromProj4(outP4)
 
     # Create a shapefile where the user specified, and add attribute fields to it.
     print("Preparing shapefile for output...")
@@ -277,6 +317,8 @@ def main():
         createAField(dst_layer, field, ogr.OFTString)
     for field in floatFieldNames:
         createAField(dst_layer, field, ogr.OFTReal)
+
+    # TODO: make script write any other attribute files to output, too?
 
     # Open and read the csv
     print("Reading csv...")
@@ -324,40 +366,52 @@ def main():
                 print("originLatLon is at " + str(originLatLon))
                 print("destinLatLon is at "+ str(destinLatLon))
                 #
-                # Convert these lat lon pairs to x,y in the outbound projected coordinate system.
-
+                # Convert these lat lon pairs to x,y in the outbound projected coordinate system, using pyproj.
 
                 # build ogr points, transform them
                 # pOrig = ogr.CreateGeometryFromWkt("POINT (" + str(originLatLon[0]) + " " + str(originLatLon[1]) + ")")
                 # pDest = ogr.CreateGeometryFromWkt("POINT (" + str(destinLatLon[0]) + " " + str(destinLatLon[1]) + ")")
                 # print("pOrig: " + str(pOrig))
-                pOrig = ogr.Geometry(ogr.wkbPoint)
-                pOrig.AddPoint(originLatLon[0], originLatLon[1])
-                pDest = ogr.Geometry(ogr.wkbPoint)
-                pDest.AddPoint(destinLatLon[0], destinLatLon[1])
+                # pOrig = ogr.Geometry(ogr.wkbPoint)
+                # pOrig.AddPoint(originLatLon[0], originLatLon[1])
+                # pDest = ogr.Geometry(ogr.wkbPoint)
+                # pDest.AddPoint(destinLatLon[0], destinLatLon[1])
+
+                # Project the coordinates with Proj.4 via pyproj
+                # see https://jswhit.github.io/pyproj/
+                # xOrigIn, yOrigIn = pIn(originLatLon[1], originLatLon[0])
+                # xDestIn, yDestIn = pIn(destinLatLon[1], destinLatLon[0])
+                # xOrigOut, yOrigOut = pyproj.transform(pIn, pOut, xOrigIn, yOrigIn)
+                # xDestOut, yDestOut = pyproj.transform(pIn, pOut, xDestIn, yDestIn)
+                #
+                xOrigOut, yOrigOut = pOut(originLatLon[1], originLatLon[0])
+                xDestOut, yDestOut = pOut(destinLatLon[1], destinLatLon[0])
 
                 # x_Orig, y_Orig, z_Orig = outboundTransform.TransformPoint(originLatLon[1], originLatLon[0]) # returns x then y then z
                 # origMapVert = (x_Orig, y_Orig)
                 # x_Dest, y_Dest, z_Dest = outboundTransform.TransformPoint(destinLatLon[1], destinLatLon[0]) # returns x then y then z
                 # destMapVert = (x_Dest, y_Dest)
-                pOrig.Transform(outboundTransform)
-                pDest.Transform(outboundTransform)
-                origMapVertXYZ = pOrig.GetPoint() # returns x,y,z tuple
-                destMapVertXYZ = pOrig.GetPoint() # returns x,y,z tuple
-                origMapVert = (origMapVertXYZ[0], origMapVertXYZ[1])
-                destMapVert = (destMapVertXYZ[0], destMapVertXYZ[1])
+                # pOrig.Transform(outboundTransform)
+                # pDest.Transform(outboundTransform)
+                # origMapVertXYZ = pOrig.GetPoint() # returns x,y,z tuple
+                # destMapVertXYZ = pOrig.GetPoint() # returns x,y,z tuple
+                # origMapVert = (origMapVertXYZ[0], origMapVertXYZ[1])
+                # destMapVert = (destMapVertXYZ[0], destMapVertXYZ[1])
 
+                origMapVert = (xOrigOut, yOrigOut)
+                destMapVert = (xDestOut, yDestOut)
+                #
                 print("Origin projected vertex x,y is      " + str(origMapVert))
                 print("Destination projected vertex x,y is " + str(destMapVert))
+
+                # Find the "dev" point for building building a cubic spline, using vector geometry.
                 #
-                # Find the "dev" point for building building a cubic spline
-                # Do this using vector geometry.
                 # Straight-line route as a vector is second vertex minus first.
                 routeVector = np.array([destMapVert[0], destMapVert[1]]) - np.array([origMapVert[0], origMapVert[1]])
                 # The user-set fraction of the arc distance for point dev is...
-                quarterVector = routeVector * devFraction
+                fractionVector = routeVector * devFraction
                 # Get the left-handed orthogonal vector of this...
-                orthogVector = calcOrthogonalVector(quarterVector, leftHanded)
+                orthogVector = calcOrthogonalVector(fractionVector, leftHanded)
                 # dev point is at midpoint of the straight-line route, plus orthogVector
                 aMidpoint = calcMidpointCoords(origMapVert, destMapVert)
                 aMidpointVector = np.array([aMidpoint[0], aMidpoint[1]])
@@ -458,9 +512,12 @@ def main():
                 lineGeometry = createLineString(rectifiedPoints) # actually create the line
                 anArc.SetGeometry(lineGeometry)
                 dst_layer.CreateFeature(anArc)
-                anArc.Destroy() # free resources
+                # anArc.Destroy() # free resources
+                anArc = None
 
-    dst_ds.Destroy()  # Destroy the data source to free resouces
+    # dst_ds.Destroy()  # Destroy the data source to free resouces and finish writing.
+    dst_ds = None
+
     print("\nFinished! Output written to: " + outFile)
 
 
