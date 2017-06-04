@@ -79,24 +79,8 @@ license = """
 
 # Notes /////////////////////////////////////////////////////////////////////////////
 
-# TODO: investigate +ellps and +datum proj4 strings for pyproj. I think when both are
-# supplied it throws an error. Should be able to prevent that; if datum is given, ellipse
-# doesn't need to be since it's implied.
-
-# OGC WKT for Azimuthal Equidistant projection on North Pole (from http://spatialreference.org/ref/esri/102016/):  PROJCS["North_Pole_Azimuthal_Equidistant",GEOGCS["GCS_WGS_1984",DATUM["WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Azimuthal_Equidistant"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Latitude_Of_Origin",90],UNIT["Meter",1],AUTHORITY["EPSG","102016"]]
-# NB - 102016 not recognized at http://www.epsg-registry.org
-
-# Rotation about (0,0) in the Cartesian plane, in a right-handed coordinate system:
-# x' = x cos(f) - y sin(f)
-# y' = y cos(f) + x sin(f)
-# These formulas work for degrees (not radians). The angle f is measured
-# counterclockwise from the x axis (i.e., negative values go clockwise.)
-
-# Rotation of a point with shapely - negative angles are clockwise, and vise versa.
-# from shapely.geometry import Point
-# point = Point(343.423, 23424.23)
-# pointPrime = aff.rotate(point, -53.0, origin=(0.0, 0.0), use_radians=False)
-
+# TODO: make script write any other attribute files to output, too?
+# TODO: add ability to move the curvature apex along the route.
 
 # Imports ///////////////////////////////////////////////////////////////////////////
 
@@ -157,7 +141,7 @@ def calcOrthogonalVector(aVector, lefthandBoolean):
 
 def calcMidpointCoords(xy1, xy2):
     """Given the endpoints of a line segment, returns the coordinates of the
-    midpoint by calculating simple x and y ranges times 0.5."""
+    midpoint by calculating simple x and y ranges, each times 0.5."""
     ydiff = (float(xy2[1]) - float(xy1[1]))
     xdiff = (float(xy2[0]) - float(xy1[0]))
     yMid = float(xy1[1]) + (0.5 * ydiff)
@@ -169,7 +153,7 @@ def createLineString(xyList):
     vertices, being tuples of format (x,y)."""
     line = ogr.Geometry(ogr.wkbLineString)
     for v in xyList:
-        line.AddPoint(v[0], v[1]) # x then y from lat, lon
+        line.AddPoint(v[0], v[1]) # x then y
     return line
 
 def createAField(dstLayer, fieldName, fieldType):
@@ -184,6 +168,8 @@ def strictly_increasing(L):
     return all(x<y for x, y in zip(L, L[1:]))
 
 def gdal_error_handler(err_class, err_num, err_msg):
+    # https://pcjericks.github.io/py-gdalogr-cookbook/gdal_general.html#install-gdal-ogr-error-handler
+    # https://trac.osgeo.org/gdal/wiki/PythonGotchas#Gotchasthatarebydesign...orperhistory
     errtype = {
             gdal.CE_None:'None',
             gdal.CE_Debug:'Debug',
@@ -197,19 +183,39 @@ def gdal_error_handler(err_class, err_num, err_msg):
     print('Error Type: %s' % (err_class))
     print('Error Message: %s' % (err_msg))
 
-def stripUnitFlagFromProj4(p4string):
-    """Removes the ''+units=m' flag from a Proj4 string, since that seems to trip pyproj up. Argh."""
+def filterProj4String(p4string):
+    """Removes the '+units' flag and value from a Proj4 string, and the '+ellps' flag and value if there is a '+datum' flag and value, since those seems to trip pyproj up. Seems kludgy. Argh."""
+    # Having a datum means specifying an ellipse is redundant.
     flags = p4string.split(" ") # I think spaces are always required in the Proj4 strings, as well as "+"
-    filteredFlags = []
+    unitsFilteredFlags = []
+    finalFilteredFlags = []
+    expU = re.compile("\+units=")
+    expE = re.compile("\+ellps=")
+    expD = re.compile("\+datum=")
+    # Filter out units flag and value
     for f in flags:
-        exp = re.compile("\+units=")
-        if not exp.match(f):
-            filteredFlags.append(f)
-    outstring = " ".join(filteredFlags)
+        if not expU.match(f):
+            unitsFilteredFlags.append(f)
+    # Test for presence of ellps and datum flags and values, and filter ellps out if both present.
+    ePresent = False
+    dPresent = False
+    for f in unitsFilteredFlags:
+        if expE.match(f):
+            ePresent = True
+    for f in unitsFilteredFlags:
+        if expD.match(f):
+            dPresent = True
+    if dPresent and ePresent:
+        for f in unitsFilteredFlags:
+            if not expE.match(f):
+                finalFilteredFlags.append(f)
+    # Return the final filtered Proj4 string
+    outstring = " ".join(finalFilteredFlags)
     print("String returned: " + outstring)
     return outstring
 
 class LicenseAction(argparse.Action):
+    """A custom action to get the license to print, and then exit."""
     def __init__(self, nargs=0, **kw):
         super().__init__(nargs=nargs, **kw)
     def __call__(self, parser, namespace, values, option_string=None):
@@ -243,10 +249,10 @@ def main():
 
     outP4 = epsgWebMercProj4
     leftHanded = True
-    fractionOfPath = 0.5 # TODO: add ability to move the curvature apex along the route.
+    fractionOfPath = 0.5
     vertsPerArc = 200
     devFraction = 0.15
-    # devFraction = (1.0 / golden) # For the Golden Ratio, phi.
+    # devFraction = (1.0 / golden) # For the Golden Ratio, phi. - This didn't seem to look very good!
 
     # Set up error handler for GDAL
     gdal.PushErrorHandler(gdal_error_handler)
@@ -267,36 +273,23 @@ def main():
     if args.vpa:
         vertsPerArc = args.vpa
     if args.outproj4:
-        # specifiedSR = osr.SpatialReference()
-        # wkt = None
         if args.outproj4.startswith("http://"):
             # URL
             f = request.urlopen(args.outproj4)
-            # str(bytes_string,'utf-8')
-            print(str(f.read(), "utf-8"))#.decode("utf-8"))
-            # wkt = f.read().decode("utf-8") # decode from byte string.
-            outP4 = stripUnitFlagFromProj4( str(f.read(), "utf-8") )#  f.read().decode("utf-8") # decode from byte string.
-            print("Setting output SR from URL.")
+            outP4 = filterProj4String( str(f.read(), "utf-8") ) # Decode from byte string.
         elif os.path.exists(args.outproj4):
             # Assuming a path to a text file has been passed in
             f = open(args.outproj4)
-            # wkt = f.read()
-            outP4 = stripUnitFlagFromProj4( f.read() )
+            outP4 = filterProj4String( f.read() )
             f.close()
         else:
             # Proj.4 string
-            outP4 = stripUnitFlagFromProj4( args.outproj4 )
-            # wkt = args.outwkt
-        # specifiedSR.ImportFromWkt(wkt)
-        # outSR = specifiedSR
+            outP4 = filterProj4String( args.outproj4 )
 
     if args.dev:
         devFraction = float(args.dev)
     if args.rh:
         leftHanded = False
-
-    # outboundTransform = osr.CoordinateTransformation(wgs84SR, outSR)
-    # print("Outbound spatial reference is projected? " + str(outSR.IsProjected()))
 
     # Build the necessary coordinate systems for Proj.4, and the output prj file
     pIn = Proj(epsgWGS84Proj4)
@@ -318,17 +311,12 @@ def main():
     for field in floatFieldNames:
         createAField(dst_layer, field, ogr.OFTReal)
 
-    # TODO: make script write any other attribute files to output, too?
-
-    # Open and read the csv
+    # Open and read the csv.
+    # Each row is an arc/arrow in the flow map. Process each row into a feature.
     print("Reading csv...")
     with open(args.ROUTES) as csvfile:
         dReader = csv.DictReader(csvfile, delimiter = ',', quotechar = '"')
-        # Can reference fields by their headers; first row taken for headers by default.
-        # Get fieldnames from DictReader object and store in list
-        # headers = dReader.fieldnames
-        # Each row is an arc/arrow in the flow map. Process each row into a feature.
-
+        # Reference fields by their headers; first row taken for headers by default.
         # Find every unique origin point, and separate arcs into groups by origin point,
         # stored in a dictionary.
         originGroups = {} # Entries return lists of lists.
@@ -344,161 +332,109 @@ def main():
             dLat   =  row["DestLat"]
             dLon   =  row["DestLon"]
             floMag =  row["FlowMag"]
-            # odName =  oName + " to " + dName
 
             thisRecordStrings = [oName, oLat, oLon, dName, dLat, dLon, floMag]
-            # print("this record is " + str(thisRecordStrings))
             thisOrigin = (float(thisRecordStrings[1]), float(thisRecordStrings[2]))
-            if thisOrigin not in originGroups: # make new dictionary entry if new.
+            if thisOrigin not in originGroups: # Make new dictionary entry if new.
                 originGroups[thisOrigin] = []
                 originKeys.append(thisOrigin)
             # Whether new or not, append this record to the values of its key.
             originGroups[thisOrigin].append(thisRecordStrings)
 
-        # print(str(originGroups))
-
         for ok in originKeys:
             theseArcs = originGroups[ok]
             for a in theseArcs:
-                print("\nworking on arc from " + str(a[0]) + " to " + str(a[3]))
+                print(str(a[0]) + " to " + str(a[3]) + "..." )
                 originLatLon = ok # lat, lon
                 destinLatLon = (float(a[4]), float(a[5])) # lat, lon
-                print("originLatLon is at " + str(originLatLon))
-                print("destinLatLon is at "+ str(destinLatLon))
                 #
                 # Convert these lat lon pairs to x,y in the outbound projected coordinate system, using pyproj.
-
-                # build ogr points, transform them
-                # pOrig = ogr.CreateGeometryFromWkt("POINT (" + str(originLatLon[0]) + " " + str(originLatLon[1]) + ")")
-                # pDest = ogr.CreateGeometryFromWkt("POINT (" + str(destinLatLon[0]) + " " + str(destinLatLon[1]) + ")")
-                # print("pOrig: " + str(pOrig))
-                # pOrig = ogr.Geometry(ogr.wkbPoint)
-                # pOrig.AddPoint(originLatLon[0], originLatLon[1])
-                # pDest = ogr.Geometry(ogr.wkbPoint)
-                # pDest.AddPoint(destinLatLon[0], destinLatLon[1])
-
-                # Project the coordinates with Proj.4 via pyproj
-                # see https://jswhit.github.io/pyproj/
-                # xOrigIn, yOrigIn = pIn(originLatLon[1], originLatLon[0])
-                # xDestIn, yDestIn = pIn(destinLatLon[1], destinLatLon[0])
-                # xOrigOut, yOrigOut = pyproj.transform(pIn, pOut, xOrigIn, yOrigIn)
-                # xDestOut, yDestOut = pyproj.transform(pIn, pOut, xDestIn, yDestIn)
-                #
                 xOrigOut, yOrigOut = pOut(originLatLon[1], originLatLon[0])
                 xDestOut, yDestOut = pOut(destinLatLon[1], destinLatLon[0])
-
-                # x_Orig, y_Orig, z_Orig = outboundTransform.TransformPoint(originLatLon[1], originLatLon[0]) # returns x then y then z
-                # origMapVert = (x_Orig, y_Orig)
-                # x_Dest, y_Dest, z_Dest = outboundTransform.TransformPoint(destinLatLon[1], destinLatLon[0]) # returns x then y then z
-                # destMapVert = (x_Dest, y_Dest)
-                # pOrig.Transform(outboundTransform)
-                # pDest.Transform(outboundTransform)
-                # origMapVertXYZ = pOrig.GetPoint() # returns x,y,z tuple
-                # destMapVertXYZ = pOrig.GetPoint() # returns x,y,z tuple
-                # origMapVert = (origMapVertXYZ[0], origMapVertXYZ[1])
-                # destMapVert = (destMapVertXYZ[0], destMapVertXYZ[1])
-
+                #
                 origMapVert = (xOrigOut, yOrigOut)
                 destMapVert = (xDestOut, yDestOut)
                 #
-                print("Origin projected vertex x,y is      " + str(origMapVert))
-                print("Destination projected vertex x,y is " + str(destMapVert))
-
                 # Find the "dev" point for building building a cubic spline, using vector geometry.
-                #
                 # Straight-line route as a vector is second vertex minus first.
                 routeVector = np.array([destMapVert[0], destMapVert[1]]) - np.array([origMapVert[0], origMapVert[1]])
-                # The user-set fraction of the arc distance for point dev is...
+                # The user-set fraction of the arc distance for point dev
                 fractionVector = routeVector * devFraction
-                # Get the left-handed orthogonal vector of this...
+                # Get the left-handed orthogonal vector of this
                 orthogVector = calcOrthogonalVector(fractionVector, leftHanded)
-                # dev point is at midpoint of the straight-line route, plus orthogVector
+                # dev point is at fraction-point of the straight-line route, plus orthogVector
                 aMidpoint = calcMidpointCoords(origMapVert, destMapVert)
                 aMidpointVector = np.array([aMidpoint[0], aMidpoint[1]])
                 devPointVector = aMidpointVector + orthogVector
                 devMapVert = (devPointVector[0], devPointVector[1])
-                print("dev projected vertex x,y is   " + str(devMapVert))
-                # aDistance = calcPythagoreanDistance(origMapVert, destMapVert)
-                # aSlope = calcSlope(origMapVert, destMapVert)
-                # orthSlope = calcOrthogonalSlope(aSlope)
-
+                #
                 # Now determine the cubic spline going through the origin,
                 # the dev point, and the destination.
                 # NB: for the scipy function we use, the x values must be a strictly monotonic, increasing series.
-                # To handle all cases, we will rotate all points counterclockwise so that the origin and
+                # To handle all cases, we will translate all three points equally so that the origin point lies
+                # on the coordinate system origin, and rotate all points counterclockwise so that the origin and
                 # destination y values are both 0. This will ensure the three x values are monotonic, increasing
                 # in sequence.
-                # The origin vertex obviously doesn't change, but the other two do.
-                # Angle of rotation necessary is given in radians by math.atan2(y2-y1, x2-x1) .
-                # Thanks to Jim Lewis: http://stackoverflow.com/questions/2676719/calculating-the-angle-between-the-line-defined-by-two-points
-                # Rotated point on x axis of the destination vertex is (x = pO_pD_dist, y = 0),
-                # and we use the above formula to find the necessary amount of rotation to
-                # find our un-rotated dev point. Then simply rotate the destination
-                # and dev points by that angle * 1.0.
-                # destMapVert_R = (pO_pD_dist, 0.0)
-                # necessaryRotation = math.atan2( destMapVert[1] - destMapVert_R[1] , destMapVert[0] - destMapVert_R[0] )
-                # reverseRotation = math.degrees( necessaryRotation ) * -1.0
-                # devMapVert_R_shapely = aff.rotate(pR, reverseRotation, origin = (0.0, 0.0), use_radians = False)
-                # devMapVert_R = (devMapVert_R_shapely.x, devMapVert_R_shapely.y)
-
-                # shift all points by vector of origMapVert, so origMapVert lies on the origin
+                #
+                # Translate all points by negative vector of origMapVert, so origMapVert lies on the origin
                 orgV = np.array([origMapVert[0], origMapVert[1]])
                 devV = np.array([devMapVert[0], devMapVert[1]])
                 desV = np.array([destMapVert[0], destMapVert[1]])
-                orgV_shft = np.array([0.0, 0.0])
+                orgV_shft = np.array([0.0, 0.0]) # orgV_shft minus itself.
                 devV_shft = devV - orgV
                 desV_shft = desV - orgV
                 devPt = Point(devV_shft[0], devV_shft[1]) # Shapely Point object
                 desPt = Point(desV_shft[0], desV_shft[1]) # Shapely Point object
-                # determine angle necessary to rotate desV_shft so it lies on the x axis.
+                # Determine angle necessary to rotate desV_shft so it lies on the x axis.
+                # The origin vertex obviously doesn't change, but the other two do.
+                # Angle of rotation necessary is given in radians by math.atan2(y2-y1, x2-x1).
+                # Thanks to Jim Lewis: http://stackoverflow.com/questions/2676719/calculating-the-angle-between-the-line-defined-by-two-points
                 theta_desV_shift = math.atan2( desV_shft[1] , desV_shft[0] ) # returned in radians
                 angleToRotateBy = -1.0 * theta_desV_shift
-                # rotate both the dev point and the destination point by this angle
+                # Rotate both the dev point and the destination point by this angle
                 orgV_shft_rot = orgV_shft # unchanged
                 devV_shft_rot = aff.rotate(devPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
                 desV_shft_rot = aff.rotate(desPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
-                # restate each point as a simple tuple
+                # Restate each point as a simple tuple
                 orgV_shft_rot_tuple = (0.0, 0.0)
                 devV_shft_rot_tuple = (devV_shft_rot.x, devV_shft_rot.y)
                 desV_shft_rot_tuple = (desV_shft_rot.x, desV_shft_rot.y)
                 # We've got the three necessary vertices to construct the cubic spline, now in strictly increasing x order.
                 csplineVerts = [orgV_shft_rot_tuple, devV_shft_rot_tuple, desV_shft_rot_tuple]
-
+                #
                 if not strictly_increasing([ orgV_shft_rot_tuple[0], devV_shft_rot_tuple[0], desV_shft_rot_tuple[0] ]):
-                    print("not strictly increasing!") # just a sanity check...
-
+                    print("X values for this spline not strictly increasing!") # just a sanity check...
                 # The cubic spline!
                 series_x = [i[0] for i in csplineVerts]
                 series_y = [i[1] for i in csplineVerts]
                 thisSpline = CubicSpline(series_x, series_y)
-                # Determine how many vertices each arc should have, using vertsPerArc,
+                # Determine how many vertices each arc should have, using user-specified vertsPerArc,
                 # over the range defined by the destination x - the origin x.
                 xRange = series_x[2] - series_x[0]
                 anInterval = xRange / vertsPerArc
                 xValues = np.arange(series_x[0], series_x[2], anInterval)
-                # NB: this leaves the dev point behind! We should have many others near it though, or it could be inserted into the sequence here.
+                # NB: this leaves the dev point behind! We should have many others near it though,
+                # or it could be inserted into the sequence here.
+                #
                 # Add final (rotated and translated) destination x value to xValues
                 np.append(xValues, desV_shft_rot_tuple[0])
                 # Evaluate interpolants by thisSpline([xValues]), store vertices as tuples (x,y)
                 yValues = thisSpline(xValues)
                 # Build list of verts with origin at beginning, then interpolated ones, then destination.
                 vertsInterpolated = [ (x,y) for x,y in zip(xValues, yValues) ]
-
                 # Now rotate these points back...
                 rerotatedPoints = []
                 for vi in vertsInterpolated:
                     aVert = Point(vi[0], vi[1]) # Shapely Point object
                     aRerotatedPoint = aff.rotate(aVert, theta_desV_shift, origin = (0.0, 0.0), use_radians = True)
                     rerotatedPoints.append(aRerotatedPoint)
-
-                # ...and now shift (translate) the rerotated points back to projected map coordinates.
+                # ...and now translate the rerotated points back to projected map coordinates.
                 rectifiedPoints = []
                 for rrp in rerotatedPoints:
                     rrpV = np.array([rrp.x, rrp.y])
                     rectV = rrpV + orgV
                     aPoint = (rectV[0], rectV[1])
                     rectifiedPoints.append(aPoint)
-
                 # Finally, build a line with this list of vertices, carrying over
                 # the FlowMag attribute, and write to file.
                 anArc = ogr.Feature(layer_defn)
@@ -512,13 +448,11 @@ def main():
                 lineGeometry = createLineString(rectifiedPoints) # actually create the line
                 anArc.SetGeometry(lineGeometry)
                 dst_layer.CreateFeature(anArc)
-                # anArc.Destroy() # free resources
-                anArc = None
+                anArc = None # Free resources
 
-    # dst_ds.Destroy()  # Destroy the data source to free resouces and finish writing.
-    dst_ds = None
+    dst_ds = None # Destroy the data source to free resouces and finish writing.
 
-    print("\nFinished! Output written to: " + outFile)
+    print("Finished! Output written to: " + outFile)
 
 
 # Main module check /////////////////////////////////////////////////////////////////////
