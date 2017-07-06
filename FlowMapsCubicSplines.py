@@ -22,10 +22,10 @@ csv file is in the README file acompanying this script.
 This is written for Python 3; it may not work on Python 2.
 
 Written against versions (via the Anaconda Python distribution):
-Python 3.4
-scipy 0.18.1
+Python 3.5.3
+scipy 0.19.0
 gdal 2.1.0
-shapely 1.5.17.post1
+shapely 1.5.16
 pyproj 1.9.5.1
 
 Please feel free to contact the author, Dr. Paulo Raposo, at
@@ -227,7 +227,7 @@ class LicenseAction(argparse.Action):
 def main():
 
     """The main method of this script, for making flow maps, hot and fresh
-     to your table, all flowy and map-like - that's amore!"""
+     to your table (or desk), all flowy and map-like - that's amore!"""
 
     # Constants, defaults, etc. /////////////////////////////////////////////////////////
 
