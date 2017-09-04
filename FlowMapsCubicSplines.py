@@ -7,8 +7,6 @@
 #  ^^-^^                         \____/\___/\____/\__, /_/   \__,_/ .___/_/ /_/\__, /
 #                                                /____/          /_/          /____/
 
-# TODO: remove reprojection from the script. Argh.
-
 """
 This script draws flow maps for rendering in a GIS. It does this by drawing
 the cubic splines between origins and destinations in the output coordinate system,
@@ -31,7 +29,7 @@ pyproj 1.9.5.1
 Please feel free to contact the author, Dr. Paulo Raposo, at
 pauloj.raposo@outlook.com. Thanks for your interest!
 
-- Paulo, pauloraposo.weebly.com
+- Paulo, http://volweb.utk.edu/~praposo
 
 """
 
@@ -79,8 +77,9 @@ license = """
 
 # Notes /////////////////////////////////////////////////////////////////////////////
 
-# TODO: make script write any other attribute files to output, too?
+# TODO: make script write any other attributes to output, too?
 # TODO: add ability to move the curvature apex along the route.
+
 
 # Imports ///////////////////////////////////////////////////////////////////////////
 
@@ -127,6 +126,7 @@ import os, csv, argparse, math, re
 from urllib import request
 import numpy as np
 # import datetime, logging
+
 
 # Functions & Classes ///////////////////////////////////////////////////////////////////
 
@@ -232,13 +232,13 @@ def main():
     # Constants, defaults, etc. /////////////////////////////////////////////////////////
 
     # EPSG:4326 WGS 84 - for required input.
-    wgs84RefURL = "http://spatialreference.org/ref/epsg/4326/" # Retrieved string below 2017-06-01
+    wgs84RefURL = "http://spatialreference.org/ref/epsg/4326/" # Retrieved string below on 2017-06-01
     epsgWGS84Proj4 = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
     wgs84SR = osr.SpatialReference()
     wgs84SR.ImportFromProj4(epsgWGS84Proj4)
 
     # EPSG:3785 Web Mercator - for default output.
-    webMercatorRefURL = "http://spatialreference.org/ref/epsg/3785/" # Retrieved string below 2017-06-01
+    webMercatorRefURL = "http://spatialreference.org/ref/epsg/3785/" # Retrieved string below on 2017-06-01
     epsgWebMercProj4 = "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378137 +b=6378137 +towgs84=0,0,0,0,0,0,0 +no_defs" # manually removed +units=m
     wmSR = osr.SpatialReference()
     wmSR.ImportFromProj4(epsgWebMercProj4)
@@ -274,16 +274,16 @@ def main():
         vertsPerArc = args.vpa
     if args.outproj4:
         if args.outproj4.startswith("http://"):
-            # URL
+            # URL.
             f = request.urlopen(args.outproj4)
             outP4 = filterProj4String( str(f.read(), "utf-8") ) # Decode from byte string.
         elif os.path.exists(args.outproj4):
-            # Assuming a path to a text file has been passed in
+            # Assuming a path to a text file has been passed in.
             f = open(args.outproj4)
             outP4 = filterProj4String( f.read() )
             f.close()
         else:
-            # Proj.4 string
+            # Proj.4 string.
             outP4 = filterProj4String( args.outproj4 )
 
     if args.dev:
@@ -291,7 +291,7 @@ def main():
     if args.rh:
         leftHanded = False
 
-    # Build the necessary coordinate systems for Proj.4, and the output prj file
+    # Build the necessary coordinate systems for Proj.4, and the output prj file.
     pIn = Proj(epsgWGS84Proj4)
     pOut = Proj(outP4)
     outSR = osr.SpatialReference()
@@ -358,18 +358,17 @@ def main():
                 # Find the "dev" point for building building a cubic spline, using vector geometry.
                 # Straight-line route as a vector is second vertex minus first.
                 routeVector = np.array([destMapVert[0], destMapVert[1]]) - np.array([origMapVert[0], origMapVert[1]])
-                # The user-set fraction of the arc distance for point dev
+                # The user-set fraction of the arc distance for point dev.
                 fractionVector = routeVector * devFraction
-                # Get the left-handed orthogonal vector of this
+                # Get the left-handed orthogonal vector of this.
                 orthogVector = calcOrthogonalVector(fractionVector, leftHanded)
-                # dev point is at fraction-point of the straight-line route, plus orthogVector
+                # dev point is at fraction-point of the straight-line route, plus orthogVector.
                 aMidpoint = calcMidpointCoords(origMapVert, destMapVert)
                 aMidpointVector = np.array([aMidpoint[0], aMidpoint[1]])
                 devPointVector = aMidpointVector + orthogVector
                 devMapVert = (devPointVector[0], devPointVector[1])
                 #
-                # Now determine the cubic spline going through the origin,
-                # the dev point, and the destination.
+                # Now determine the cubic spline going through the origin, the dev point, and the destination.
                 # NB: for the scipy function we use, the x values must be a strictly monotonic, increasing series.
                 # To handle all cases, we will translate all three points equally so that the origin point lies
                 # on the coordinate system origin, and rotate all points counterclockwise so that the origin and
@@ -391,8 +390,8 @@ def main():
                 # Thanks to Jim Lewis: http://stackoverflow.com/questions/2676719/calculating-the-angle-between-the-line-defined-by-two-points
                 theta_desV_shift = math.atan2( desV_shft[1] , desV_shft[0] ) # returned in radians
                 angleToRotateBy = -1.0 * theta_desV_shift
-                # Rotate both the dev point and the destination point by this angle
-                orgV_shft_rot = orgV_shft # unchanged
+                # Rotate both the dev point and the destination point by this angle.
+                orgV_shft_rot = orgV_shft # Origin unchanged.
                 devV_shft_rot = aff.rotate(devPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
                 desV_shft_rot = aff.rotate(desPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
                 # Restate each point as a simple tuple
@@ -416,9 +415,9 @@ def main():
                 # NB: this leaves the dev point behind! We should have many others near it though,
                 # or it could be inserted into the sequence here.
                 #
-                # Add final (rotated and translated) destination x value to xValues
+                # Add final (rotated and translated) destination x value to xValues.
                 np.append(xValues, desV_shft_rot_tuple[0])
-                # Evaluate interpolants by thisSpline([xValues]), store vertices as tuples (x,y)
+                # Evaluate interpolants by thisSpline([xValues]), store vertices as tuples (x,y).
                 yValues = thisSpline(xValues)
                 # Build list of verts with origin at beginning, then interpolated ones, then destination.
                 vertsInterpolated = [ (x,y) for x,y in zip(xValues, yValues) ]
