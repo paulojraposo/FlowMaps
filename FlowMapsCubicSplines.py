@@ -33,20 +33,9 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 
 """
 
-dependencies = """Python 3
-scipy
-gdal
-shapely
-pyproj (Proj.4)"""
+dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
-sf = """
-  __                   ___
- (_ ` _   ) o  _   _   )_  ) _         _ |
-.__) )_) (  ( ) ) )_) (   ( (_) )_)_) (  o
-    (            (_                   _)
-"""
-
-progName = "Spline Flows"
+progName = "Cubic Spline Flow Maps"
 __version__ = "0.1, June 2017"
 
 license = """
@@ -88,9 +77,8 @@ try:
     from pyproj import Proj
 except ImportError:
     print("""This script depends on the pyproj library, which isn't installed in
-    this Pyhon environment. Please install the library or use an environment with
-    it installed.
-    Exiting.""")
+    this Pyhon environment. Please install the library or use an environment
+    with it installed. Exiting.""")
     exit()
 try:
     import osgeo
@@ -98,18 +86,16 @@ try:
     gdal.UseExceptions()
 except ImportError:
     print("""This script depends on the GDAL library, which isn't installed in this
-    Python environment. Please install the library or use a Python environment with
-    GDAL installed.
-    Exiting.""")
+    Python environment. Please install the library or use a Python environment
+    with GDAL installed. Exiting.""")
     exit()
 try:
     from scipy.interpolate import CubicSpline
     # from scipy.constants import golden
 except ImportError:
     print("""This script depends on the scipy library, version 0.18 or greater,
-    which isn't installed in this Python environment. Please install the library or
-    use a Python environment with scipy installed.
-    Exiting.""")
+    which isn't installed in this Python environment. Please install the
+    library or use a Python environment with scipy installed. Exiting.""")
     exit()
 try:
     import shapely.affinity as aff
@@ -117,9 +103,8 @@ try:
     from shapely.geometry import Point
 except ImportError:
     print("""This script depends on the shapely library, version 1.5.17.post1 or
-    greater, which isn't installed in this Python environment. Please install the
-    library or use a Python environment with scipy installed.
-    Exiting.""")
+    greater, which isn't installed in this Python environment. Please install
+    the library or use a Python environment with scipy installed. Exiting.""")
     exit()
 
 import os, csv, argparse, math, re
@@ -258,7 +243,7 @@ def main():
     gdal.PushErrorHandler(gdal_error_handler)
 
     # Parse command line arguments
-    helpString = sf + "A script for making flow maps in GIS, using cubic splines,\nby Paulo Raposo (pauloj.raposo@outlook.com).\nWritten for Python 3 - may not work on 2.\nUnder MIT license.\n\nDependencies include:\n" + dependencies
+    helpString = progName + " -- " + "A script for making flow maps in GIS, using cubic splines, by Paulo Raposo (pauloj.raposo@outlook.com).\nUnder MIT license. \nWritten for Python 3 - may not work on 2. Dependencies include: " + dependencies
     parser = argparse.ArgumentParser(prog = progName, description = helpString, formatter_class = argparse.RawDescriptionHelpFormatter)
     parser.add_argument("ROUTES", help = "CSV file specifying routes and magnitudes. Coordinates must be lat and lon in WGS84. Please see the README file for required formatting.")
     parser.add_argument("OUTSHPFILE", help = "File path and name for output shapefile, with extension '.shp'. The directory must already exist.")
@@ -403,7 +388,7 @@ def main():
                 #
                 if not strictly_increasing([ orgV_shft_rot_tuple[0], devV_shft_rot_tuple[0], desV_shft_rot_tuple[0] ]):
                     print("X values for this spline not strictly increasing!") # just a sanity check...
-                # The cubic spline!
+                # The cubic spline:
                 series_x = [i[0] for i in csplineVerts]
                 series_y = [i[1] for i in csplineVerts]
                 thisSpline = CubicSpline(series_x, series_y)
@@ -451,7 +436,7 @@ def main():
 
     dst_ds = None # Destroy the data source to free resouces and finish writing.
 
-    print("Finished! Output written to: " + outFile)
+    print("Finished, output written to: " + outFile)
 
 
 # Main module check /////////////////////////////////////////////////////////////////////
