@@ -233,12 +233,14 @@ def main():
     textFieldNames = ["Orig", "Dest"]
     floatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon"]
 
+    # Various default values
     outP4 = epsgWebMercProj4
     leftHanded = True
     fractionOfPath = 0.5
     vertsPerArc = 200
     devFraction = 0.15
-    # devFraction = (1.0 / golden) # For the Golden Ratio, phi. - This didn't seem to look very good!
+    # devFraction = (0.25 / 1.618) # For the Golden Ratio, phi.
+
 
     # Set up error handler for GDAL
     gdal.PushErrorHandler(gdal_error_handler)
@@ -249,11 +251,11 @@ def main():
     parser.add_argument("ROUTES", help = "CSV file specifying routes and magnitudes. Coordinates must be lat and lon in WGS84. Please see the README file for required formatting.")
     parser.add_argument("OUTSHPFILE", help = "File path and name for output shapefile, with extension '.shp'. The directory must already exist.")
     parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'http://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., http://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing (only) a Proj.4 string. Default output projection is Web Mercator (" + webMercatorRefURL + ").")
-    parser.add_argument("--dev", help = "The fraction of the projected straight-line distance between start and end points of each arc at which a third, across-track deviated point should be established for cubic splines. Values must be between 0.0 and 1.0. Larger values make arcs more curved. Default is 0.15.")
-    parser.add_argument("--vpa", help = "The number of vertices the mapped arcs should each have. Must be greater than 3, but should be at least several dozen to a couple hundred or so. Default is " + str(vertsPerArc) + ".")
-    parser.add_argument("--rh", default = False, action = "store_true",  help = "Sets the across-track deviation point on the right-hand side instead of left. Changes the directions that arcs curve in.")
-    parser.add_argument("-v", "--version", action = "version", version = "%(prog)s " + __version__)
-    parser.add_argument("-l", "--license", action = LicenseAction, nargs = 0, help = "Print the script's license and exit.")
+    parser.add_argument("-d", "--dev", help = "The across-track distance at which a deviated point should be established from the straight-line vector between origin and destination points, expressed as a fraction of the straight line distance. Larger values make arcs more curved, while zero makes straight lines. Negative values result in right-handed curves. Default is 0.15.")
+    parser.add_argument("-v", "--vpa", help = "The number of vertices the mapped arcs should each have. Must be greater than 3, but typically should be at least several dozen to a few hundred or so. Default is " + str(vertsPerArc) + ".")
+    parser.add_argument("--rh", default = False, action = "store_true",  help = "Sets the across-track deviation point on the right-hand side instead of left. Changes the directions that arcs curve in. The same effect as setting this as true with a positive --dev number can be achieved by setting a negative --dev number.")
+    parser.add_argument("--version", action = "version", version = "%(prog)s " + __version__)
+    parser.add_argument("--license", action = LicenseAction, nargs = 0, help = "Print the script's license and exit.")
     #
     args = parser.parse_args()
     if args.vpa:
@@ -298,7 +300,7 @@ def main():
         createAField(dst_layer, field, ogr.OFTReal)
 
     # Open and read the csv.
-    # Each row is an arc/arrow in the flow map. Process each row into a feature.
+    # Each row is an arc/route in the flow map. Process each row into a feature.
     print("Reading csv...")
     with open(args.ROUTES) as csvfile:
         dReader = csv.DictReader(csvfile, delimiter = ',', quotechar = '"')
@@ -397,7 +399,8 @@ def main():
                 # over the range defined by the destination x - the origin x.
                 xRange = series_x[2] - series_x[0]
                 anInterval = xRange / vertsPerArc
-                xValues = np.arange(series_x[0], series_x[2], anInterval)
+                # xValues = np.linspace(series_x[0], series_x[2], num=anInterval, endpoint=True) # works, but slower by far than np.append()
+                xValues = np.append( np.arange(series_x[0], series_x[2], anInterval), series_x[2] )
                 # NB: this leaves the dev point behind! We should have many others near it though,
                 # or it could be inserted into the sequence here.
                 #
@@ -433,7 +436,7 @@ def main():
                 lineGeometry = createLineString(rectifiedPoints) # actually create the line
                 anArc.SetGeometry(lineGeometry)
                 dst_layer.CreateFeature(anArc)
-                anArc = None # Free resources
+                anArc = None # Free resources, finish this route.
 
     dst_ds = None # Destroy the data source to free resouces and finish writing.
 
@@ -445,5 +448,5 @@ def main():
 if __name__ == '__main__':
     main()
 
+
 # fin
-# exit()
