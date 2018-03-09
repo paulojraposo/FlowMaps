@@ -37,7 +37,7 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
 progName = "Cubic Spline Flow Maps"
-__version__ = "0.1, June 2017"
+__version__ = "0.2, March 2018"
 
 license = """
 # Under MIT License:
@@ -68,7 +68,6 @@ license = """
 # Notes /////////////////////////////////////////////////////////////////////////////
 
 # TODO: make script write any other attributes to output, too?
-# TODO: add ability to move the curvature apex along the route.
 
 
 # Imports ///////////////////////////////////////////////////////////////////////////
@@ -125,13 +124,14 @@ def calcOrthogonalVector(aVector, lefthandBoolean):
     else:
         return np.array([aVector[1] * -1.0, aVector[0]])
 
-def calcMidpointCoords(xy1, xy2):
-    """Given the endpoints of a line segment, returns the coordinates of the
-    midpoint by calculating simple x and y ranges, each times 0.5."""
+def calcAlongSegmentCoords(xy1, xy2, asf):
+    """Given the endpoints of a line segment, and an 'along-segment fraction,'
+    returns the coordinates of the midpoint by calculating simple x and y
+    ranges, each times the value of asf."""
     ydiff = (float(xy2[1]) - float(xy1[1]))
     xdiff = (float(xy2[0]) - float(xy1[0]))
-    yMid = float(xy1[1]) + (0.5 * ydiff)
-    xMid = float(xy1[0]) + (0.5 * xdiff)
+    yMid = float(xy1[1]) + (asf * ydiff)
+    xMid = float(xy1[0]) + (asf * xdiff)
     return (xMid, yMid)
 
 def createLineString(xyList):
@@ -237,8 +237,9 @@ def main():
     outP4 = epsgWebMercProj4
     leftHanded = True
     fractionOfPath = 0.5
-    vertsPerArc = 200
+    vertsPerArc = 300
     devFraction = 0.15
+    alongSegmentFraction = 0.5
     # devFraction = (0.25 / 1.618) # For the Golden Ratio, phi.
 
 
@@ -251,6 +252,7 @@ def main():
     parser.add_argument("ROUTES", help = "CSV file specifying routes and magnitudes. Coordinates must be lat and lon in WGS84. Please see the README file for required formatting.")
     parser.add_argument("OUTSHPFILE", help = "File path and name for output shapefile, with extension '.shp'. The directory must already exist.")
     parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'http://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., http://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing (only) a Proj.4 string. Default output projection is Web Mercator (" + webMercatorRefURL + ").")
+    parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point, espressed as a number between 0.0 and 1.0. Default is 0.5. Avoid extremely small and extremely large values.")
     parser.add_argument("-d", "--dev", help = "The across-track distance at which a deviated point should be established from the straight-line vector between origin and destination points, expressed as a fraction of the straight line distance. Larger values make arcs more curved, while zero makes straight lines. Negative values result in right-handed curves. Default is 0.15.")
     parser.add_argument("-v", "--vpa", help = "The number of vertices the mapped arcs should each have. Must be greater than 3, but typically should be at least several dozen to a few hundred or so. Default is " + str(vertsPerArc) + ".")
     parser.add_argument("--rh", default = False, action = "store_true",  help = "Sets the across-track deviation point on the right-hand side instead of left. Changes the directions that arcs curve in. The same effect as setting this as true with a positive --dev number can be achieved by setting a negative --dev number.")
@@ -274,6 +276,8 @@ def main():
             # Proj.4 string.
             outP4 = filterProj4String( args.outproj4 )
 
+    if args.asf:
+        alongSegmentFraction = float(args.asf)
     if args.dev:
         devFraction = float(args.dev)
     if args.rh:
@@ -281,7 +285,11 @@ def main():
 
     # Build the necessary coordinate systems for Proj.4, and the output prj file.
     pIn = Proj(epsgWGS84Proj4)
-    pOut = Proj(outP4)
+    try:
+        pOut = Proj(outP4)
+    except:
+        print("Unable to define projection from input provided for Proj4. Please ensure the string is valid. Exiting.")
+        exit()
     outSR = osr.SpatialReference()
     outSR.ImportFromProj4(outP4)
 
@@ -343,18 +351,29 @@ def main():
                 origMapVert = (xOrigOut, yOrigOut)
                 destMapVert = (xDestOut, yDestOut)
                 #
-                # Find the "dev" point for building building a cubic spline, using vector geometry.
-                # Straight-line route as a vector is second vertex minus first.
+                ## Find the "dev" point for building building a cubic spline, using vector geometry.
+                #
+                # Straight-line route as a vector starting at coord system origin is second vertex minus first.
                 routeVector = np.array([destMapVert[0], destMapVert[1]]) - np.array([origMapVert[0], origMapVert[1]])
+                # print("route: " + str(routeVector))
+                #
+                # get along-track fraction of line as vector.
+                alongTrackVector = routeVector * alongSegmentFraction
+                # print("along: " + str(alongTrackVector))
+                #
                 # The user-set fraction of the arc distance for point dev.
-                fractionVector = routeVector * devFraction
+                deviationVector = routeVector * devFraction
+                # print("dev: " + str(deviationVector))
+                #
                 # Get the left-handed orthogonal vector of this.
-                orthogVector = calcOrthogonalVector(fractionVector, leftHanded)
-                # dev point is at fraction-point of the straight-line route, plus orthogVector.
-                aMidpoint = calcMidpointCoords(origMapVert, destMapVert)
-                aMidpointVector = np.array([aMidpoint[0], aMidpoint[1]])
-                devPointVector = aMidpointVector + orthogVector
+                orthogVector = calcOrthogonalVector(deviationVector, leftHanded)
+                # print("orthog: " + str(orthogVector))
+                #
+                # dev point is at the origin point + aMidpointVector + orthogVector
+                devPointVector = np.array([origMapVert[0], origMapVert[1]]) + alongTrackVector + orthogVector
                 devMapVert = (devPointVector[0], devPointVector[1])
+                # print("devpt: " + str(devMapVert))
+                #
                 #
                 # Now determine the cubic spline going through the origin, the dev point, and the destination.
                 # NB: for the scipy function we use, the x values must be a strictly monotonic, increasing series.
@@ -394,7 +413,14 @@ def main():
                 # The cubic spline:
                 series_x = [i[0] for i in csplineVerts]
                 series_y = [i[1] for i in csplineVerts]
-                thisSpline = CubicSpline(series_x, series_y)
+
+
+                # Boundary Conditions are crucial to shape here!!!!
+                # TODO: study these and do something smart here using first and second derivatives at line ends.
+                # see https://docs.scipy.org/doc/scipy-0.18.1/reference/generated/scipy.interpolate.CubicSpline.html
+                thisSpline = CubicSpline(series_x, series_y, bc_type=((1, 0.0), (1, 0.0)))
+
+
                 # Determine how many vertices each arc should have, using user-specified vertsPerArc,
                 # over the range defined by the destination x - the origin x.
                 xRange = series_x[2] - series_x[0]
