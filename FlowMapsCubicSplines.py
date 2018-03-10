@@ -68,7 +68,7 @@ license = """
 # Notes /////////////////////////////////////////////////////////////////////////////
 
 # TODO: make script write any other attributes to output, too?
-
+# TODO: add different interpolator methods like Akima and pchip.
 
 # Imports ///////////////////////////////////////////////////////////////////////////
 
@@ -115,14 +115,14 @@ import numpy as np
 
 # Functions & Classes ///////////////////////////////////////////////////////////////////
 
-def calcOrthogonalVector(aVector, lefthandBoolean):
+def calcOrthogonalVector(aVector, counterclockwise):
     """Given a 2-vector (i.e., a numpy 2D array), this returns the orthogonal
-    vector of the same magnitude in either the left- or right-hand direction,
-    corresponding to the given boolean flag."""
-    if lefthandBoolean == True:
-        return np.array([aVector[1], aVector[0] * -1.0])
-    else:
+    vector of the same magnitude in either the clockwise or counterclockwise
+    direction, corresponding to the given boolean flag."""
+    if counterclockwise:
         return np.array([aVector[1] * -1.0, aVector[0]])
+    else:
+        return np.array([aVector[1], aVector[0] * -1.0])
 
 def calcAlongSegmentCoords(xy1, xy2, asf):
     """Given the endpoints of a line segment, and an 'along-segment fraction,'
@@ -235,7 +235,7 @@ def main():
 
     # Various default values
     outP4 = epsgWebMercProj4
-    leftHanded = True
+    clockWise = True
     fractionOfPath = 0.5
     vertsPerArc = 300
     devFraction = 0.15
@@ -255,7 +255,7 @@ def main():
     parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point, espressed as a number between 0.0 and 1.0. Default is 0.5. Avoid extremely small and extremely large values.")
     parser.add_argument("-d", "--dev", help = "The across-track distance at which a deviated point should be established from the straight-line vector between origin and destination points, expressed as a fraction of the straight line distance. Larger values make arcs more curved, while zero makes straight lines. Negative values result in right-handed curves. Default is 0.15.")
     parser.add_argument("-v", "--vpa", help = "The number of vertices the mapped arcs should each have. Must be greater than 3, but typically should be at least several dozen to a few hundred or so. Default is " + str(vertsPerArc) + ".")
-    parser.add_argument("--rh", default = False, action = "store_true",  help = "Sets the across-track deviation point on the right-hand side instead of left. Changes the directions that arcs curve in. The same effect as setting this as true with a positive --dev number can be achieved by setting a negative --dev number.")
+    parser.add_argument("--ccw", default = False, action = "store_true",  help = "Sets the across-track deviation point by rotating the across-track vector counter-clockwise, thereby putting that point on the 'left.' Changes the directions that arcs curve in. Default is clockwise.")
     parser.add_argument("--version", action = "version", version = "%(prog)s " + __version__)
     parser.add_argument("--license", action = LicenseAction, nargs = 0, help = "Print the script's license and exit.")
     #
@@ -280,8 +280,8 @@ def main():
         alongSegmentFraction = float(args.asf)
     if args.dev:
         devFraction = float(args.dev)
-    if args.rh:
-        leftHanded = False
+    if args.ccw:
+        clockWise = False
 
     # Build the necessary coordinate systems for Proj.4, and the output prj file.
     pIn = Proj(epsgWGS84Proj4)
@@ -366,7 +366,7 @@ def main():
                 # print("dev: " + str(deviationVector))
                 #
                 # Get the left-handed orthogonal vector of this.
-                orthogVector = calcOrthogonalVector(deviationVector, leftHanded)
+                orthogVector = calcOrthogonalVector(deviationVector, clockWise)
                 # print("orthog: " + str(orthogVector))
                 #
                 # dev point is at the origin point + aMidpointVector + orthogVector
