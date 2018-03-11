@@ -3,16 +3,16 @@
 
 #   .-.                              _____                                  __
 #   /v\    L   I   N   U   X       / ____/__   ___   ___   ____ ___   ___  / /_  __  __
-#  // \\  >Phear the Penguin<     / / __/ _ \/ __ \/ __ `/ ___/ __ `/ __ \/ __ \/ / / /
+#  // \\                          / / __/ _ \/ __ \/ __ `/ ___/ __ `/ __ \/ __ \/ / / /
 # /(   )\                        / /_/ /  __/ /_/ / /_/ / /  / /_/ / /_/ / / / / /_/ /
 #  ^^-^^                         \____/\___/\____/\__, /_/   \__,_/ .___/_/ /_/\__, /
 #                                                /____/          /_/          /____/
 
 """
-This script draws flow maps for rendering in a GIS. It does this by drawing
-the cubic splines between origins and destinations in the output coordinate system,
-combined with an across-track point. This module depends on GDAL/OGR,
-pyproj, shapely, and scipy, each of which is freely available and open-source.
+This script draws flow maps for rendering in a GIS. It does this by drawing an
+interpolation between origins and destinations in the output coordinate system,
+combined with an across-track point. This module depends on GDAL/OGR, pyproj,
+shapely, and scipy, each of which is freely available and open-source.
 
 You must supply the script with a csv file where each row represents an arc
 with a flow magnitude. Specific information about the required format of that
@@ -36,13 +36,13 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 
 dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
-progName = "Cubic Spline Flow Maps"
+progName = "Interpolated Flow Maps"
 __version__ = "0.2, March 2018"
 
 license = """
 # Under MIT License:
 #
-# Copyright (c) 2017 Paulo Raposo, Ph.D. - pauloj.raposo@outlook.com
+# Copyright (c) 2018 Paulo Raposo, Ph.D. - pauloj.raposo@outlook.com
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -68,7 +68,7 @@ license = """
 # Notes /////////////////////////////////////////////////////////////////////////////
 
 # TODO: make script write any other attributes to output, too?
-# TODO: add different interpolator methods like Akima and pchip.
+# TODO: write out to GeoJSON as well as shapefile.
 
 # Imports ///////////////////////////////////////////////////////////////////////////
 
@@ -90,8 +90,7 @@ except ImportError:
     with GDAL installed. Exiting.""")
     exit()
 try:
-    from scipy.interpolate import CubicSpline
-    # from scipy.constants import golden
+    from scipy.interpolate import CubicSpline, Akima1DInterpolator, PchipInterpolator
 except ImportError:
     print("""This script depends on the scipy library, version 0.18 or greater,
     which isn't installed in this Python environment. Please install the
@@ -115,14 +114,14 @@ import numpy as np
 
 # Functions & Classes ///////////////////////////////////////////////////////////////////
 
-def calcOrthogonalVector(aVector, counterclockwise):
+def calcOrthogonalVector(aVector, clockwise):
     """Given a 2-vector (i.e., a numpy 2D array), this returns the orthogonal
-    vector of the same magnitude in either the clockwise or counterclockwise
+    vector of the same magnitude in either the clockwise or counter-clockwise
     direction, corresponding to the given boolean flag."""
-    if counterclockwise:
-        return np.array([aVector[1] * -1.0, aVector[0]])
-    else:
+    if clockwise == True:
         return np.array([aVector[1], aVector[0] * -1.0])
+    else:
+        return np.array([aVector[1] * -1.0, aVector[0]])
 
 def calcAlongSegmentCoords(xy1, xy2, asf):
     """Given the endpoints of a line segment, and an 'along-segment fraction,'
@@ -133,6 +132,22 @@ def calcAlongSegmentCoords(xy1, xy2, asf):
     yMid = float(xy1[1]) + (asf * ydiff)
     xMid = float(xy1[0]) + (asf * xdiff)
     return (xMid, yMid)
+
+def generateInterpolator(xSeries, ySeries, aType):
+    """Given an x and y series (assumed to be in sync with each other!),
+    and a string indicating which type of interpolant is asked for,
+    returns the calculated interpolation function from the appropriate
+    SciPy method. Options are 'cs' for cubic spline, 'a' for Akima, and
+    'pchip' for PCHIP."""
+    interpo = acceptedInterpolators[aType]
+    if interpo == CubicSpline:
+        # Boundary Conditions are crucial to shape here!!!!
+        # TODO: study these and do something smart here using first and second derivatives at line ends.
+        # see https://docs.scipy.org/doc/scipy-0.18.1/reference/generated/scipy.interpolate.CubicSpline.html
+        i = interpo(xSeries, ySeries, bc_type=((1, 0.0), (1, 0.0)))
+    else:
+        i =  interpo(xSeries, ySeries)
+    return i
 
 def createLineString(xyList):
     """Creates an ORG LineString geometry, given a sequenced list of
@@ -208,6 +223,14 @@ class LicenseAction(argparse.Action):
         print(license)
 
 
+# The acceptable values for interpolator types as code and SciPy method pairs.
+acceptedInterpolators = {
+    "cs":    CubicSpline,
+    "a":     Akima1DInterpolator,
+    "pchip": PchipInterpolator
+}
+
+
 # Script /////////////////////////////////////////////////////////////////////////////////
 
 def main():
@@ -216,6 +239,9 @@ def main():
      to your table (or desk), all flowy and map-like - that's amore!"""
 
     # Constants, defaults, etc. /////////////////////////////////////////////////////////
+
+    # Set up error handler for GDAL
+    gdal.PushErrorHandler(gdal_error_handler)
 
     # EPSG:4326 WGS 84 - for required input.
     wgs84RefURL = "http://spatialreference.org/ref/epsg/4326/" # Retrieved string below on 2017-06-01
@@ -235,31 +261,31 @@ def main():
 
     # Various default values
     outP4 = epsgWebMercProj4
-    clockWise = True
-    fractionOfPath = 0.5
-    vertsPerArc = 300
-    devFraction = 0.15
+    interpolator = "cs"
     alongSegmentFraction = 0.5
-    # devFraction = (0.25 / 1.618) # For the Golden Ratio, phi.
+    devFraction = 0.15
+    vertsPerArc = 300
+    clockWise = True
+    verbose = False
+    # gr = 0.25 / 1.618 # For the Golden Ratio, phi.
 
-
-    # Set up error handler for GDAL
-    gdal.PushErrorHandler(gdal_error_handler)
-
-    # Parse command line arguments
-    helpString = progName + " -- " + "A script for making flow maps in GIS, using cubic splines, by Paulo Raposo (pauloj.raposo@outlook.com).\nUnder MIT license. \nWritten for Python 3 - may not work on 2. Dependencies include: " + dependencies
-    parser = argparse.ArgumentParser(prog = progName, description = helpString, formatter_class = argparse.RawDescriptionHelpFormatter)
+    # Usage messages, and parse command line arguments.
+    descString = progName + " -- " + "A script for making flow maps in GIS, using interpolated paths, by Paulo Raposo (pauloj.raposo@outlook.com).\nUnder MIT license. \nWritten for Python 3 - may not work on 2. Dependencies include: " + dependencies + "."
+    parser = argparse.ArgumentParser(prog = progName, description = descString, formatter_class = argparse.RawDescriptionHelpFormatter)
     parser.add_argument("ROUTES", help = "CSV file specifying routes and magnitudes. Coordinates must be lat and lon in WGS84. Please see the README file for required formatting.")
-    parser.add_argument("OUTSHPFILE", help = "File path and name for output shapefile, with extension '.shp'. The directory must already exist.")
+    parser.add_argument("OUTSHPFILE", help = "File path and name for output shapefile, with extension '.shp'. The containing directory must already exist.")
     parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'http://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., http://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing (only) a Proj.4 string. Default output projection is Web Mercator (" + webMercatorRefURL + ").")
-    parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point, espressed as a number between 0.0 and 1.0. Default is 0.5. Avoid extremely small and extremely large values.")
+    parser.add_argument("-i", "--interpolator", help = "The type of interpolator to use. Options are 'cs' for cubic spline (the default), 'a' for Akima, and 'pchp' for PCHIP.")
+    parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point. Expressed as a number between 0.0 and 1.0. Default is 0.5.")
     parser.add_argument("-d", "--dev", help = "The across-track distance at which a deviated point should be established from the straight-line vector between origin and destination points, expressed as a fraction of the straight line distance. Larger values make arcs more curved, while zero makes straight lines. Negative values result in right-handed curves. Default is 0.15.")
     parser.add_argument("-v", "--vpa", help = "The number of vertices the mapped arcs should each have. Must be greater than 3, but typically should be at least several dozen to a few hundred or so. Default is " + str(vertsPerArc) + ".")
-    parser.add_argument("--ccw", default = False, action = "store_true",  help = "Sets the across-track deviation point by rotating the across-track vector counter-clockwise, thereby putting that point on the 'left.' Changes the directions that arcs curve in. Default is clockwise.")
+    parser.add_argument("--ccw", default = False, action = "store_true",  help = "Sets the across-track deviation point on the left by rotating the across-track vector counter-clockwise. Changes the directions that arcs curve in. Default is clockwise.")
+    parser.add_argument("--verbose", default = False, action = "store_true", help = "Be verbose while running, printing lots of status messages.")
     parser.add_argument("--version", action = "version", version = "%(prog)s " + __version__)
     parser.add_argument("--license", action = LicenseAction, nargs = 0, help = "Print the script's license and exit.")
     #
     args = parser.parse_args()
+    #
     if args.vpa:
         vertsPerArc = args.vpa
     if args.outproj4:
@@ -275,15 +301,25 @@ def main():
         else:
             # Proj.4 string.
             outP4 = filterProj4String( args.outproj4 )
-
+    if args.interpolator:
+        if args.interpolator in acceptedInterpolators.keys():
+            interpolator = args.interpolator
+        else:
+            print("Didn't understand the specified interpolator type. Acceptable codes are {}. Exiting.".format(str(list(acceptedInterpolators.keys()))))
+            exit()
     if args.asf:
         alongSegmentFraction = float(args.asf)
+        if alongSegmentFraction <= 0.0 or alongSegmentFraction >= 1.0:
+            print("Along-segment fraction {} is out of bounds, must be within 0.0 and 1.0. Exiting.".format(str(alongSegmentFraction)))
+            exit()
     if args.dev:
         devFraction = float(args.dev)
     if args.ccw:
         clockWise = False
+    if args.verbose:
+        verbose = True
 
-    # Build the necessary coordinate systems for Proj.4, and the output prj file.
+    # Build the necessary coordinate systems.
     pIn = Proj(epsgWGS84Proj4)
     try:
         pOut = Proj(outP4)
@@ -293,8 +329,9 @@ def main():
     outSR = osr.SpatialReference()
     outSR.ImportFromProj4(outP4)
 
-    # Create a shapefile where the user specified, and add attribute fields to it.
-    print("Preparing shapefile for output...")
+    # Create an output file where the user specified, and add attribute fields to it.
+    if verbose:
+        print("Preparing file for output...")
     outFileDir, outFilename = os.path.split(args.OUTSHPFILE)
     driver = ogr.GetDriverByName('ESRI Shapefile')
     outFile = os.path.join(outFileDir, outFilename)
@@ -309,7 +346,8 @@ def main():
 
     # Open and read the csv.
     # Each row is an arc/route in the flow map. Process each row into a feature.
-    print("Reading csv...")
+    if verbose:
+        print("Reading csv...")
     with open(args.ROUTES) as csvfile:
         dReader = csv.DictReader(csvfile, delimiter = ',', quotechar = '"')
         # Reference fields by their headers; first row taken for headers by default.
@@ -318,7 +356,7 @@ def main():
         originGroups = {} # Entries return lists of lists.
         originKeys = []
 
-        for row in dReader: # populate originGroups
+        for row in dReader: # Populate originGroups.
 
             # These strings are the headers (and fields) the input csv must have.
             oName  =  row["OrigName"]
@@ -338,88 +376,82 @@ def main():
             originGroups[thisOrigin].append(thisRecordStrings)
 
         for ok in originKeys:
+
             theseArcs = originGroups[ok]
+
             for a in theseArcs:
-                print(str(a[0]) + " to " + str(a[3]) + "..." )
+
+                if verbose:
+                    print(str(a[0]) + " to " + str(a[3]) + "..." )
+
                 originLatLon = ok # lat, lon
                 destinLatLon = (float(a[4]), float(a[5])) # lat, lon
-                #
+
                 # Convert these lat lon pairs to x,y in the outbound projected coordinate system, using pyproj.
                 xOrigOut, yOrigOut = pOut(originLatLon[1], originLatLon[0])
                 xDestOut, yDestOut = pOut(destinLatLon[1], destinLatLon[0])
-                #
+
                 origMapVert = (xOrigOut, yOrigOut)
                 destMapVert = (xDestOut, yDestOut)
-                #
-                ## Find the "dev" point for building building a cubic spline, using vector geometry.
-                #
+
+                ## Find the "dev" point for defining an interpolator, using vector geometry.
+
                 # Straight-line route as a vector starting at coord system origin is second vertex minus first.
                 routeVector = np.array([destMapVert[0], destMapVert[1]]) - np.array([origMapVert[0], origMapVert[1]])
-                # print("route: " + str(routeVector))
-                #
+
                 # get along-track fraction of line as vector.
                 alongTrackVector = routeVector * alongSegmentFraction
-                # print("along: " + str(alongTrackVector))
-                #
+
                 # The user-set fraction of the arc distance for point dev.
                 deviationVector = routeVector * devFraction
-                # print("dev: " + str(deviationVector))
-                #
+
                 # Get the left-handed orthogonal vector of this.
                 orthogVector = calcOrthogonalVector(deviationVector, clockWise)
-                # print("orthog: " + str(orthogVector))
-                #
+
                 # dev point is at the origin point + aMidpointVector + orthogVector
                 devPointVector = np.array([origMapVert[0], origMapVert[1]]) + alongTrackVector + orthogVector
                 devMapVert = (devPointVector[0], devPointVector[1])
-                # print("devpt: " + str(devMapVert))
-                #
-                #
-                # Now determine the cubic spline going through the origin, the dev point, and the destination.
-                # NB: for the scipy function we use, the x values must be a strictly monotonic, increasing series.
-                # To handle all cases, we will translate all three points equally so that the origin point lies
-                # on the coordinate system origin, and rotate all points counterclockwise so that the origin and
-                # destination y values are both 0. This will ensure the three x values are monotonic, increasing
-                # in sequence.
-                #
-                # Translate all points by negative vector of origMapVert, so origMapVert lies on the origin
+
+                # Now determine the interpolator going through the origin, the dev point, and the destination.
+                # NB: Usually, for the SciPy functions we use, the x values must be a strictly monotonic,
+                # increasing series. To handle all cases, we will translate all three points equally so that the
+                # origin point lies on the coordinate system origin, and rotate all points counterclockwise so
+                # that the origin and destination y values are both 0. This will ensure the three x values are
+                # monotonic, increasing in sequence.
+
+                # Translate all points by negative vector of origMapVert, so origMapVert lies on the origin.
                 orgV = np.array([origMapVert[0], origMapVert[1]])
                 devV = np.array([devMapVert[0], devMapVert[1]])
                 desV = np.array([destMapVert[0], destMapVert[1]])
                 orgV_shft = np.array([0.0, 0.0]) # orgV_shft minus itself.
                 devV_shft = devV - orgV
                 desV_shft = desV - orgV
-                devPt = Point(devV_shft[0], devV_shft[1]) # Shapely Point object
-                desPt = Point(desV_shft[0], desV_shft[1]) # Shapely Point object
+                devPt = Point(devV_shft[0], devV_shft[1]) # Shapely Point object.
+                desPt = Point(desV_shft[0], desV_shft[1]) # Shapely Point object.
                 # Determine angle necessary to rotate desV_shft so it lies on the x axis.
                 # The origin vertex obviously doesn't change, but the other two do.
                 # Angle of rotation necessary is given in radians by math.atan2(y2-y1, x2-x1).
                 # Thanks to Jim Lewis: http://stackoverflow.com/questions/2676719/calculating-the-angle-between-the-line-defined-by-two-points
-                theta_desV_shift = math.atan2( desV_shft[1] , desV_shft[0] ) # returned in radians
+                theta_desV_shift = math.atan2( desV_shft[1] , desV_shft[0] ) # Returned in radians.
                 angleToRotateBy = -1.0 * theta_desV_shift
                 # Rotate both the dev point and the destination point by this angle.
                 orgV_shft_rot = orgV_shft # Origin unchanged.
                 devV_shft_rot = aff.rotate(devPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
                 desV_shft_rot = aff.rotate(desPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
-                # Restate each point as a simple tuple
+                # Restate each point as a simple tuple.
                 orgV_shft_rot_tuple = (0.0, 0.0)
                 devV_shft_rot_tuple = (devV_shft_rot.x, devV_shft_rot.y)
                 desV_shft_rot_tuple = (desV_shft_rot.x, desV_shft_rot.y)
-                # We've got the three necessary vertices to construct the cubic spline, now in strictly increasing x order.
-                csplineVerts = [orgV_shft_rot_tuple, devV_shft_rot_tuple, desV_shft_rot_tuple]
+                # We've got the three necessary vertices to construct an interpolator, now in strictly increasing x order.
+                interpoVerts = [orgV_shft_rot_tuple, devV_shft_rot_tuple, desV_shft_rot_tuple]
                 #
+                # Just a sanity check...
                 if not strictly_increasing([ orgV_shft_rot_tuple[0], devV_shft_rot_tuple[0], desV_shft_rot_tuple[0] ]):
-                    print("X values for this spline not strictly increasing!") # just a sanity check...
-                # The cubic spline:
-                series_x = [i[0] for i in csplineVerts]
-                series_y = [i[1] for i in csplineVerts]
-
-
-                # Boundary Conditions are crucial to shape here!!!!
-                # TODO: study these and do something smart here using first and second derivatives at line ends.
-                # see https://docs.scipy.org/doc/scipy-0.18.1/reference/generated/scipy.interpolate.CubicSpline.html
-                thisSpline = CubicSpline(series_x, series_y, bc_type=((1, 0.0), (1, 0.0)))
-
+                    print("X values for this interpolation are not strictly increasing!")
+                # The interpolator:
+                series_x = [i[0] for i in interpoVerts]
+                series_y = [i[1] for i in interpoVerts]
+                thisInterpolator = generateInterpolator(series_x, series_y, interpolator)
 
                 # Determine how many vertices each arc should have, using user-specified vertsPerArc,
                 # over the range defined by the destination x - the origin x.
@@ -427,19 +459,19 @@ def main():
                 anInterval = xRange / vertsPerArc
                 # xValues = np.linspace(series_x[0], series_x[2], num=anInterval, endpoint=True) # works, but slower by far than np.append()
                 xValues = np.append( np.arange(series_x[0], series_x[2], anInterval), series_x[2] )
-                # NB: this leaves the dev point behind! We should have many others near it though,
+                # NB: This leaves the dev point behind! We should have many others near it though,
                 # or it could be inserted into the sequence here.
                 #
                 # Add final (rotated and translated) destination x value to xValues.
                 np.append(xValues, desV_shft_rot_tuple[0])
-                # Evaluate interpolants by thisSpline([xValues]), store vertices as tuples (x,y).
-                yValues = thisSpline(xValues)
+                # Evaluate interpolants by thisInterpolator([xValues]), store vertices as tuples (x,y).
+                yValues = thisInterpolator(xValues)
                 # Build list of verts with origin at beginning, then interpolated ones, then destination.
                 vertsInterpolated = [ (x,y) for x,y in zip(xValues, yValues) ]
                 # Now rotate these points back...
                 rerotatedPoints = []
                 for vi in vertsInterpolated:
-                    aVert = Point(vi[0], vi[1]) # Shapely Point object
+                    aVert = Point(vi[0], vi[1]) # Shapely Point object.
                     aRerotatedPoint = aff.rotate(aVert, theta_desV_shift, origin = (0.0, 0.0), use_radians = True)
                     rerotatedPoints.append(aRerotatedPoint)
                 # ...and now translate the rerotated points back to projected map coordinates.

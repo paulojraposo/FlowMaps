@@ -1,13 +1,11 @@
-README file for Spline Flows program, for making flow maps
+README file for Flow Maps program, for making flow maps
 using cubic splines.
 
 First, thanks for your interest!  Feel free to email the
 author, Dr. Paulo Raposo, at pauloj.raposo@outlook.com.
 
-
-
 The script takes one input file, being a csv table of flows.
-It produces one output file in geojson format.
+It produces one output file in shapefile format.
 
 Please note that the input csv file must be in the format
 of the example below.  The headers seen below, named exactly
