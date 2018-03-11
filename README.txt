@@ -1,5 +1,5 @@
 README file for Flow Maps program, for making flow maps
-using cubic splines.
+using mathematical interpolations.
 
 First, thanks for your interest!  Feel free to email the
 author, Dr. Paulo Raposo, at pauloj.raposo@outlook.com.
