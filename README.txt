@@ -5,9 +5,10 @@ First, thanks for your interest!  Feel free to email the
 author, Dr. Paulo Raposo, at pauloj.raposo@outlook.com.
 
 The script takes one input file, being a csv table of flows.
-It produces one output file in shapefile format.
+It produces one output file in shapefile, geojson, kml, gml,
+or gmt format.
 
-Please note that the input csv file must be in the format
+Please note that the input CSV file must be in the format
 of the example below.  The headers seen below, named exactly
 as seen, must be present and unique in the input file, though
 other headers/columns may exist (these will be ignored).
