@@ -37,7 +37,7 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
 progName = "Interpolated Flow Maps"
-__version__ = "0.2, March 2018"
+__version__ = "0.3, March 2018"
 
 license = """
 # Under MIT License:
@@ -67,8 +67,8 @@ license = """
 
 # Notes /////////////////////////////////////////////////////////////////////////////
 
-# TODO: make script write any other attributes to output, too?
-# TODO: write out to GeoJSON as well as shapefile.
+# TODO: make script write any other attributes to output, too.
+# TODO: allow user to skew curves.
 
 # Imports ///////////////////////////////////////////////////////////////////////////
 
@@ -144,8 +144,9 @@ def generateInterpolator(xSeries, ySeries, aType):
         # Boundary Conditions are crucial to shape here!!!!
         # TODO: study these and do something smart here using first and second derivatives at line ends.
         # see https://docs.scipy.org/doc/scipy-0.18.1/reference/generated/scipy.interpolate.CubicSpline.html
-        i = interpo(xSeries, ySeries, bc_type=((1, 0.0), (1, 0.0)))
+        i = interpo(xSeries, ySeries, bc_type=((2, 0.0), (2, 0.0))) # A 'natural' spline, with second derivatives at ends = 0.0.
     else:
+        # Akima or PCHIP
         i =  interpo(xSeries, ySeries)
     return i
 
@@ -230,6 +231,18 @@ acceptedInterpolators = {
     "pchip": PchipInterpolator
 }
 
+# The acceptable output file types by file extension and their driver names for OGR.
+# These are a hand-picked subset of these: http://gdal.org/1.11/ogr/ogr_formats.html.
+# These are chosen mainly because they're available in OGR by default (i.e., OGR is
+# compiled supporting them by default), and they carry attribute fields over well.
+typesAndDrivers = {
+    ".shp":     "ESRI Shapefile",
+    ".geojson": "GeoJSON",
+    ".kml":     "KML",
+    ".gml":     "GML",
+    ".gmt":     "GMT"
+}
+
 
 # Script /////////////////////////////////////////////////////////////////////////////////
 
@@ -273,7 +286,7 @@ def main():
     descString = progName + " -- " + "A script for making flow maps in GIS, using interpolated paths, by Paulo Raposo (pauloj.raposo@outlook.com).\nUnder MIT license. \nWritten for Python 3 - may not work on 2. Dependencies include: " + dependencies + "."
     parser = argparse.ArgumentParser(prog = progName, description = descString, formatter_class = argparse.RawDescriptionHelpFormatter)
     parser.add_argument("ROUTES", help = "CSV file specifying routes and magnitudes. Coordinates must be lat and lon in WGS84. Please see the README file for required formatting.")
-    parser.add_argument("OUTSHPFILE", help = "File path and name for output shapefile, with extension '.shp'. The containing directory must already exist.")
+    parser.add_argument("OUTPUTFILE", help = "File path and name for output shapefile. The containing directory must already exist. The file format is determined from the extension given here, with these options: .shp, .kml, .gml, .gmt, or .geojson.")
     parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'http://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., http://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing (only) a Proj.4 string. Default output projection is Web Mercator (" + webMercatorRefURL + ").")
     parser.add_argument("-i", "--interpolator", help = "The type of interpolator to use. Options are 'cs' for cubic spline (the default), 'a' for Akima, and 'pchp' for PCHIP.")
     parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point. Expressed as a number between 0.0 and 1.0. Default is 0.5.")
@@ -285,7 +298,14 @@ def main():
     parser.add_argument("--license", action = LicenseAction, nargs = 0, help = "Print the script's license and exit.")
     #
     args = parser.parse_args()
-    #
+
+    # Set variables, do various checks on input arguments.
+    pathAndFile, ext = os.path.splitext(args.OUTPUTFILE)
+    try:
+        ogrDriverName = typesAndDrivers[ext.lower()]
+    except:
+        print("Output file must be of one of these types: {}. Exiting.".format(str(list(typesAndDrivers.keys()))))
+        exit()
     if args.vpa:
         vertsPerArc = args.vpa
     if args.outproj4:
@@ -332,9 +352,8 @@ def main():
     # Create an output file where the user specified, and add attribute fields to it.
     if verbose:
         print("Preparing file for output...")
-    outFileDir, outFilename = os.path.split(args.OUTSHPFILE)
-    driver = ogr.GetDriverByName('ESRI Shapefile')
-    outFile = os.path.join(outFileDir, outFilename)
+    driver = ogr.GetDriverByName(ogrDriverName)
+    outFile = args.OUTPUTFILE
     dst_ds = driver.CreateDataSource(outFile)
     fName = os.path.splitext(os.path.split(outFile)[1])[0]
     dst_layer = dst_ds.CreateLayer(fName, outSR, geom_type = ogr.wkbLineString)
@@ -344,7 +363,7 @@ def main():
     for field in floatFieldNames:
         createAField(dst_layer, field, ogr.OFTReal)
 
-    # Open and read the csv.
+    # Open and read the CSV.
     # Each row is an arc/route in the flow map. Process each row into a feature.
     if verbose:
         print("Reading csv...")
