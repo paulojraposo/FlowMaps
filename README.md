@@ -6,7 +6,9 @@ The script takes one input file, being a CSV table of flows. It produces one out
 
 For thorough usage information, please use the help flag from the command line:
 
-`python InterpolatedFlowMaps.py -h`
+```
+python InterpolatedFlowMaps.py -h
+```
 
 Please note that the input CSV file must be in the format of the example below.  The headers seen below, named exactly as seen, must be present and unique in the input file, though other headers/columns may exist (these will be ignored). Sequencing of the headers does not matter. Strings throughout may be enclosed in double quotes.  FlowMag variables can have decimals, but don't necessarily need to be numbers (e.g., they could be strings like "high" or "low") - these values are simply copied to the output geojson file.
 
