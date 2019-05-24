@@ -186,34 +186,36 @@ def gdal_error_handler(err_class, err_num, err_msg):
     print('Error Message: %s' % (err_msg))
 
 def filterProj4String(p4string):
-    """Removes the '+units' flag and value from a Proj4 string, and the '+ellps' flag and value if there is a '+datum' flag and value, since those seems to trip pyproj up. Seems kludgy. Argh."""
-    # Having a datum means specifying an ellipse is redundant.
-    flags = p4string.split(" ") # I think spaces are always required in the Proj4 strings, as well as "+"
-    unitsFilteredFlags = []
-    finalFilteredFlags = []
-    expU = re.compile("\+units=")
-    expE = re.compile("\+ellps=")
-    expD = re.compile("\+datum=")
-    # Filter out units flag and value
-    for f in flags:
-        if not expU.match(f):
-            unitsFilteredFlags.append(f)
-    # Test for presence of ellps and datum flags and values, and filter ellps out if both present.
-    ePresent = False
-    dPresent = False
-    for f in unitsFilteredFlags:
-        if expE.match(f):
-            ePresent = True
-    for f in unitsFilteredFlags:
-        if expD.match(f):
-            dPresent = True
-    if dPresent and ePresent:
-        for f in unitsFilteredFlags:
-            if not expE.match(f):
-                finalFilteredFlags.append(f)
+    """
+    Removes the '+units' flag and value from a Proj4 string, and the
+    '+ellps' flag and value if there is a '+datum' flag and value, 
+    since those seems to trip pyproj up. Seems kludgy. Argh.
+    """
+
+    def should_keep_flag(flag, should_remove_ellps):
+        """
+        Determines if a flag should be kept
+        in the string.
+        """
+        if flag.startswith("+units="):
+            return False
+
+        if should_remove_ellps and flag.startswith("+ellps="):
+            return False
+
+        return True
+
+    has_datum_flag = "+datum=" in p4string
+
+    flags = [
+        flag for flag in p4string.split(" ")
+        # Having a datum means specifying an ellipse is redundant.
+        if should_keep_flag(flag, has_datum_flag)
+    ]
+
     # Return the final filtered Proj4 string
-    outstring = " ".join(finalFilteredFlags)
-    print("String returned: " + outstring)
+    outstring = " ".join(flags)
+    print("String returned: {}".format(outstring))
     return outstring
 
 class LicenseAction(argparse.Action):
