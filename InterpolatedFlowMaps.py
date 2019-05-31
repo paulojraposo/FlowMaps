@@ -185,7 +185,7 @@ def gdal_error_handler(err_class, err_num, err_msg):
     print('Error Type: %s' % (err_class))
     print('Error Message: %s' % (err_msg))
 
-def filterProj4String(p4string):
+def filterProj4String(p4string, should_print_final_string):
     """
     Removes the '+units' flag and value from a Proj4 string, and the
     '+ellps' flag and value if there is a '+datum' flag and value, 
@@ -215,7 +215,8 @@ def filterProj4String(p4string):
 
     # Return the final filtered Proj4 string
     outstring = " ".join(flags)
-    print("String returned: {}".format(outstring))
+    if should_print_final_string:
+        print("String returned: {}".format(outstring))
     return outstring
 
 class LicenseAction(argparse.Action):
@@ -274,14 +275,6 @@ def main():
     textFieldNames = ["Orig", "Dest"]
     floatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon"]
 
-    # Various default values
-    outP4 = epsgWebMercProj4
-    interpolator = "cs"
-    alongSegmentFraction = 0.5
-    devFraction = 0.15
-    vertsPerArc = 300
-    clockWise = True
-    verbose = False
     # gr = 0.25 / 1.618 # For the Golden Ratio, phi.
 
     # Usage messages, and parse command line arguments.
@@ -289,12 +282,12 @@ def main():
     parser = argparse.ArgumentParser(prog = progName, description = descString, formatter_class = argparse.RawDescriptionHelpFormatter)
     parser.add_argument("ROUTES", help = "CSV file specifying routes and magnitudes. Coordinates must be lat and lon in WGS84. Please see the README file for required formatting.")
     parser.add_argument("OUTPUTFILE", help = "File path and name for output shapefile. The containing directory must already exist. The file format is determined from the extension given here, with these options: .shp, .kml, .gml, .gmt, or .geojson.")
-    parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'http://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., http://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing (only) a Proj.4 string. Default output projection is Web Mercator (" + webMercatorRefURL + ").")
-    parser.add_argument("-i", "--interpolator", help = "The type of interpolator to use. Options are 'cs' for cubic spline (the default), 'a' for Akima, and 'pchp' for PCHIP.")
-    parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point. Expressed as a number between 0.0 and 1.0. Default is 0.5.")
-    parser.add_argument("-d", "--dev", help = "The across-track distance at which a deviated point should be established from the straight-line vector between origin and destination points, expressed as a fraction of the straight line distance. Larger values make arcs more curved, while zero makes straight lines. Negative values result in right-handed curves. Default is 0.15.")
-    parser.add_argument("-v", "--vpa", help = "The number of vertices the mapped arcs should each have. Must be greater than 3, but typically should be at least several dozen to a few hundred or so. Default is " + str(vertsPerArc) + ".")
-    parser.add_argument("--ccw", default = False, action = "store_true",  help = "Sets the across-track deviation point on the left by rotating the across-track vector counter-clockwise. Changes the directions that arcs curve in. Default is clockwise.")
+    parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'http://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., http://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing (only) a Proj.4 string. Default output projection is Web Mercator (" + webMercatorRefURL + ").", default=epsgWebMercProj4)
+    parser.add_argument("-i", "--interpolator", help = "The type of interpolator to use. Options are 'cs' for cubic spline (the default), 'a' for Akima, and 'pchp' for PCHIP.", default="cs")
+    parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point. Expressed as a number between 0.0 and 1.0. Default is %(default)f.", default=0.5, type=float)
+    parser.add_argument("-d", "--dev", help = "The across-track distance at which a deviated point should be established from the straight-line vector between origin and destination points, expressed as a fraction of the straight line distance. Larger values make arcs more curved, while zero makes straight lines. Negative values result in right-handed curves. Default is %(default)f.", default=0.15, type=float)
+    parser.add_argument("-v", "--vpa", help = "The number of vertices the mapped arcs should each have. Must be greater than 3, but typically should be at least several dozen to a few hundred or so. Default is %(default)d.", default=300, type=int)
+    parser.add_argument("--ccw", default = False, action = "store_true", help = "Sets the across-track deviation point on the left by rotating the across-track vector counter-clockwise. Changes the directions that arcs curve in. Default is clockwise.")
     parser.add_argument("--verbose", default = False, action = "store_true", help = "Be verbose while running, printing lots of status messages.")
     parser.add_argument("--version", action = "version", version = "%(prog)s " + __version__)
     parser.add_argument("--license", action = LicenseAction, nargs = 0, help = "Print the script's license and exit.")
@@ -308,38 +301,27 @@ def main():
     except:
         print("Output file must be of one of these types: {}. Exiting.".format(str(list(typesAndDrivers.keys()))))
         exit()
-    if args.vpa:
-        vertsPerArc = args.vpa
-    if args.outproj4:
-        if args.outproj4.startswith("http://"):
-            # URL.
-            f = request.urlopen(args.outproj4)
-            outP4 = filterProj4String( str(f.read(), "utf-8") ) # Decode from byte string.
-        elif os.path.exists(args.outproj4):
-            # Assuming a path to a text file has been passed in.
-            f = open(args.outproj4)
-            outP4 = filterProj4String( f.read() )
-            f.close()
-        else:
-            # Proj.4 string.
-            outP4 = filterProj4String( args.outproj4 )
-    if args.interpolator:
-        if args.interpolator in acceptedInterpolators.keys():
-            interpolator = args.interpolator
-        else:
-            print("Didn't understand the specified interpolator type. Acceptable codes are {}. Exiting.".format(str(list(acceptedInterpolators.keys()))))
-            exit()
-    if args.asf:
-        alongSegmentFraction = float(args.asf)
-        if alongSegmentFraction <= 0.0 or alongSegmentFraction >= 1.0:
-            print("Along-segment fraction {} is out of bounds, must be within 0.0 and 1.0. Exiting.".format(str(alongSegmentFraction)))
-            exit()
-    if args.dev:
-        devFraction = float(args.dev)
-    if args.ccw:
-        clockWise = False
-    if args.verbose:
-        verbose = True
+    
+    if args.interpolator not in acceptedInterpolators:
+        print("Didn't understand the specified interpolator type. Acceptable codes are {}. Exiting.".format(str(list(acceptedInterpolators.keys()))))
+        exit()
+
+    if args.asf <= 0.0 or args.asf >= 1.0:
+        print("Along-segment fraction {} is out of bounds, must be within 0.0 and 1.0. Exiting.".format(str(args.asf)))
+        exit()
+
+    if args.outproj4.startswith("http://"):
+        # URL.
+        f = request.urlopen(args.outproj4)
+        outP4 = filterProj4String( str(f.read(), "utf-8"), args.verbose) # Decode from byte string.
+    elif os.path.exists(args.outproj4):
+        # Assuming a path to a text file has been passed in.
+        f = open(args.outproj4)
+        outP4 = filterProj4String( f.read(), args.verbose)
+        f.close()
+    else:
+        # Proj.4 string.
+        outP4 = filterProj4String( args.outproj4, args.verbose)
 
     # Build the necessary coordinate systems.
     pIn = Proj(epsgWGS84Proj4)
@@ -352,7 +334,7 @@ def main():
     outSR.ImportFromProj4(outP4)
 
     # Create an output file where the user specified, and add attribute fields to it.
-    if verbose:
+    if args.verbose:
         print("Preparing file for output...")
     driver = ogr.GetDriverByName(ogrDriverName)
     outFile = args.OUTPUTFILE
@@ -367,7 +349,7 @@ def main():
 
     # Open and read the CSV.
     # Each row is an arc/route in the flow map. Process each row into a feature.
-    if verbose:
+    if args.verbose:
         print("Reading csv...")
     with open(args.ROUTES) as csvfile:
         dReader = csv.DictReader(csvfile, delimiter = ',', quotechar = '"')
@@ -402,7 +384,7 @@ def main():
 
             for a in theseArcs:
 
-                if verbose:
+                if args.verbose:
                     print(str(a[0]) + " to " + str(a[3]) + "..." )
 
                 originLatLon = ok # lat, lon
@@ -421,13 +403,13 @@ def main():
                 routeVector = np.array([destMapVert[0], destMapVert[1]]) - np.array([origMapVert[0], origMapVert[1]])
 
                 # get along-track fraction of line as vector.
-                alongTrackVector = routeVector * alongSegmentFraction
+                alongTrackVector = routeVector * args.asf
 
                 # The user-set fraction of the arc distance for point dev.
-                deviationVector = routeVector * devFraction
+                deviationVector = routeVector * args.dev
 
                 # Get the left-handed orthogonal vector of this.
-                orthogVector = calcOrthogonalVector(deviationVector, clockWise)
+                orthogVector = calcOrthogonalVector(deviationVector, not args.ccw)
 
                 # dev point is at the origin point + aMidpointVector + orthogVector
                 devPointVector = np.array([origMapVert[0], origMapVert[1]]) + alongTrackVector + orthogVector
@@ -472,12 +454,12 @@ def main():
                 # The interpolator:
                 series_x = [i[0] for i in interpoVerts]
                 series_y = [i[1] for i in interpoVerts]
-                thisInterpolator = generateInterpolator(series_x, series_y, interpolator)
+                thisInterpolator = generateInterpolator(series_x, series_y, args.interpolator)
 
                 # Determine how many vertices each arc should have, using user-specified vertsPerArc,
                 # over the range defined by the destination x - the origin x.
                 xRange = series_x[2] - series_x[0]
-                anInterval = xRange / vertsPerArc
+                anInterval = xRange / args.vpa
                 # xValues = np.linspace(series_x[0], series_x[2], num=anInterval, endpoint=True) # works, but slower by far than np.append()
                 xValues = np.append( np.arange(series_x[0], series_x[2], anInterval), series_x[2] )
                 # NB: This leaves the dev point behind! We should have many others near it though,
