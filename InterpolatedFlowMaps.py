@@ -30,14 +30,14 @@ pyproj 1.9.5.1
 Please feel free to contact the author, Dr. Paulo Raposo, at
 pauloj.raposo@outlook.com. Thanks for your interest!
 
-- Paulo, http://volweb.utk.edu/~praposo
+- Paulo, paulojraposo.github.io
 
 """
 
 dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
 progName = "Interpolated Flow Maps"
-__version__ = "0.3, March 2018"
+__version__ = "0.31, November 2019"
 
 license = """
 # Under MIT License:
@@ -259,13 +259,13 @@ def main():
     gdal.PushErrorHandler(gdal_error_handler)
 
     # EPSG:4326 WGS 84 - for required input.
-    wgs84RefURL = "http://spatialreference.org/ref/epsg/4326/" # Retrieved string below on 2017-06-01
+    wgs84RefURL = "https://spatialreference.org/ref/epsg/4326/" # Retrieved string below on 2017-06-01
     epsgWGS84Proj4 = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
     wgs84SR = osr.SpatialReference()
     wgs84SR.ImportFromProj4(epsgWGS84Proj4)
 
     # EPSG:3785 Web Mercator - for default output.
-    webMercatorRefURL = "http://spatialreference.org/ref/epsg/3785/" # Retrieved string below on 2017-06-01
+    webMercatorRefURL = "https://spatialreference.org/ref/epsg/3785/" # Retrieved string below on 2017-06-01
     epsgWebMercProj4 = "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378137 +b=6378137 +towgs84=0,0,0,0,0,0,0 +no_defs" # manually removed +units=m
     wmSR = osr.SpatialReference()
     wmSR.ImportFromProj4(epsgWebMercProj4)
@@ -289,7 +289,7 @@ def main():
     parser = argparse.ArgumentParser(prog = progName, description = descString, formatter_class = argparse.RawDescriptionHelpFormatter)
     parser.add_argument("ROUTES", help = "CSV file specifying routes and magnitudes. Coordinates must be lat and lon in WGS84. Please see the README file for required formatting.")
     parser.add_argument("OUTPUTFILE", help = "File path and name for output shapefile. The containing directory must already exist. The file format is determined from the extension given here, with these options: .shp, .kml, .gml, .gmt, or .geojson.")
-    parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'http://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., http://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing (only) a Proj.4 string. Default output projection is Web Mercator (" + webMercatorRefURL + ").")
+    parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'https://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., https://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing (only) a Proj.4 string. Default output projection is Web Mercator (" + webMercatorRefURL + ").")
     parser.add_argument("-i", "--interpolator", help = "The type of interpolator to use. Options are 'cs' for cubic spline (the default), 'a' for Akima, and 'pchp' for PCHIP.")
     parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point. Expressed as a number between 0.0 and 1.0. Default is 0.5.")
     parser.add_argument("-d", "--dev", help = "The across-track distance at which a deviated point should be established from the straight-line vector between origin and destination points, expressed as a fraction of the straight line distance. Larger values make arcs more curved, while zero makes straight lines. Negative values result in right-handed curves. Default is 0.15.")
@@ -311,7 +311,7 @@ def main():
     if args.vpa:
         vertsPerArc = args.vpa
     if args.outproj4:
-        if args.outproj4.startswith("http://"):
+        if args.outproj4.startswith("https://"):
             # URL.
             f = request.urlopen(args.outproj4)
             outP4 = filterProj4String( str(f.read(), "utf-8") ) # Decode from byte string.
