@@ -55,4 +55,4 @@ Windows: `cd C:\Users\MyName\Downloads`
 7) Run the script on the provided demo data:\
 `python InterpolatedFlowMaps.py testdata.csv testdata01.shp`
 
-The script produces just the skeletal polylines for the flows. Once you have those, use your favorite GIS (e.g., QGIS at qgis.org) to symbolize them, for example by drawing line or arrow widths according to the FlowMag attribute, as in the image at top.
+The script produces just the skeletal polylines for the flows. Once you have those, use your favorite GIS (e.g., QGIS at https://qgis.org) to symbolize them, for example by drawing line or arrow widths according to the FlowMag attribute, as in the image at top.
