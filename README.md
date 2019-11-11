@@ -48,7 +48,7 @@ Ponta Delgada,37.7483018179,-25.6665834976,Knoxville,35.9700124298,-83.920030356
 4) Activate your conda environment:\
 `conda activate tryflows`
 5) Navigate to the folder where you’ve downloaded the .py file, e.g.,\
-Linux, Max, Unix-like systems: `cd /home/MyName/Downloads`\
+Linux, Mac, Unix-like systems: `cd /home/MyName/Downloads`\
 Windows: `cd C:\Users\MyName\Downloads`
 6) Use your Anaconda Python environment to run the file, asking for the detailed help documentation:\
 `python InterpolatedFlowMaps.py -h`
