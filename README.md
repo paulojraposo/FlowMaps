@@ -6,13 +6,15 @@
 
 <img src="figures/example2.png" width="1000"><br>
 
+<small>Flows drawn for an azimuthal projection centered on Toronto.</small>
+
 This Python script makes flow maps using mathematical interpolations between a start and an end point in a given map projection. The script takes one input file, being a CSV table of flows. It produces one output file in shapefile, geojson, kml, gml, or gmt format. For thorough usage information, please use the help flag from the command line:
 
 ```
 python InterpolatedFlowMaps.py -h
 ```
 
-Please note that the input CSV file must be in the format of the example below.  The headers seen below, named exactly as seen, must be present and unique in the input file, though other headers/columns may exist (these will be ignored). Sequencing of the headers does not matter. Strings throughout may be enclosed in double quotes.  FlowMag variables can have decimals, but don't necessarily need to be numbers (e.g., they could be strings like "high" or "low") - these values are simply copied to the output geojson file.
+Please note that the input CSV file must be in the format of the example below.  The headers seen below, named exactly as seen, must be present and unique in the input file, though other headers/columns may exist (these will be ignored). Sequencing of the headers does not matter. Strings throughout may be enclosed in double quotes.  FlowMag variables can have decimals, but don't necessarily need to be numbers (e.g., they could be strings like "high" or "low") - these values are simply copied to the output file.
 
 All coordinate values must be latitude and longitude in WGS84.
 
@@ -61,6 +63,12 @@ The provided QML file can help you get started with symbolizing your flow lines 
 
 <img src="figures/qmlloadscreencap.png"><br>
 
-For more along these lines (get it?), see Anita Graser's excellent blog, <a href="https://anitagraser.com" target="_blank">https://anitagraser.com</a>, where she's frequently discussed flow maps and how to make them in QGIS.
+## Usage and Citation
 
-Thanks for your interest, and I hope the script is useful and fun to use for you!
+If you make maps with this, I'd love to hear about it (pauloj.raposo@outlook.com). If you're using this in an academic setting, please cite the presentation where it was first published:
+
+<a href="https://www.youtube.com/watch?v=6rPWODqNpvg" target="_block">Raposo, P. (2017). Open-Source Flow Maps with Cubic Splines. Presented at the North American Cartographic Information Society (NACIS) Annual Meeting, Montreal, Canada.</a>
+
+For more along these lines (get it?), see Anita Graser's excellent blog, <a href="https://anitagraser.com" target="_blank">https://anitagraser.com</a>, where she's frequently discussed flow maps and how to make them in QGIS. Other stuff by me can be found on <a href="https://paulojraposo.github.io" target="_blank">my website</a>.
+
+Thanks for your interest!
