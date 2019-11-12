@@ -1,8 +1,10 @@
 # FlowMaps
 
-<img src="figures/example.png"><br>
+<img src="figures/example1.png" width="1000"><br>
 
 <small>The basemap used above from <a href="www.naturalearthdata.com" target="_blank">NaturalEarthData.com</a>.</small>
+
+<img src="figures/example2.png" width="1000"><br>
 
 This Python script makes flow maps using mathematical interpolations between a start and an end point in a given map projection. The script takes one input file, being a CSV table of flows. It produces one output file in shapefile, geojson, kml, gml, or gmt format. For thorough usage information, please use the help flag from the command line:
 
