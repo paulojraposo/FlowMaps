@@ -67,8 +67,9 @@ license = """
 
 # Notes /////////////////////////////////////////////////////////////////////////////
 
-# TODO: make script write any other attributes to output, too.
-# TODO: allow user to skew curves.
+# TODO: Make script write any other attributes to output, too.
+#       Use DictReader's fieldnames attribute to get input file's fields.
+# TODO: Allow user to skew curves.
 
 # Imports ///////////////////////////////////////////////////////////////////////////
 
@@ -188,7 +189,7 @@ def gdal_error_handler(err_class, err_num, err_msg):
 def filterProj4String(p4string):
     """
     Removes the '+units' flag and value from a Proj4 string, and the
-    '+ellps' flag and value if there is a '+datum' flag and value, 
+    '+ellps' flag and value if there is a '+datum' flag and value,
     since those seems to trip pyproj up. Seems kludgy. Argh.
     """
 
