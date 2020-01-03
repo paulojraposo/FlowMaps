@@ -69,6 +69,10 @@ license = """
 
 # TODO: Make script write any other attributes to output, too.
 #       Use DictReader's fieldnames attribute to get input file's fields.
+#       Need to revise how features are finally written to the output -
+#       that's got hard-coded queries for field values saved in dictionaries
+#       at the moment.
+
 # TODO: Allow user to skew curves.
 
 # Imports ///////////////////////////////////////////////////////////////////////////
@@ -107,7 +111,7 @@ except ImportError:
     the library or use a Python environment with scipy installed. Exiting.""")
     exit()
 
-import os, csv, argparse, math, re
+import os, csv, argparse, math
 from urllib import request
 import numpy as np
 # import datetime, logging
