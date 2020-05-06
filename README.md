@@ -43,19 +43,19 @@ Ponta Delgada,37.7483018179,-25.6665834976,Knoxville,35.9700124298,-83.920030356
 
 ## Getting Started
 
-1) Download the InterpolatedFlowMaps.py and testdata.csv files from this repository.
-2) I recommend using Anaconda as a Python package manager. Install Anaconda (or Miniconda). If you've already got it, skip this step. See https://www.anaconda.com/distribution/.
-3) In a terminal, create a conda environment called `tryflows` with the necessary packages:\
+1. Download the InterpolatedFlowMaps.py and testdata.csv files from this repository.  
+2. I recommend using Anaconda as a Python package manager. Install Anaconda (or Miniconda). If you've already got it, skip this step. See https://www.anaconda.com/distribution/.  
+3. In a terminal, create a conda environment called `tryflows` with the necessary packages:  
 `conda create -n tryflows python=3.5 scipy gdal shapely pyproj`
-4) Activate your conda environment:\
-`conda activate tryflows`
-5) Navigate to the folder where you’ve downloaded the .py file, e.g.,\
-Linux, Mac, Unix-like systems: `cd /home/MyName/Downloads`\
-Windows: `cd C:\Users\MyName\Downloads`
-6) Use your Anaconda Python environment to run the file, asking for the detailed help documentation:\
-`python InterpolatedFlowMaps.py -h`
-7) Run the script on the provided demo data:\
-`python InterpolatedFlowMaps.py testdata.csv testdata01.shp`
+4. Activate your conda environment:  
+`conda activate tryflows`  
+5. Navigate to the folder where you’ve downloaded the .py file, e.g.,  
+Linux, Mac, Unix-like systems: `cd /home/MyName/Downloads`  
+Windows: `cd C:\Users\MyName\Downloads`  
+6. Use your Anaconda Python environment to run the file, asking for the detailed help documentation:  
+`python InterpolatedFlowMaps.py -h`  
+7. Run the script on the provided demo data:  
+`python InterpolatedFlowMaps.py testdata.csv testdata.shp`  
 
 The script produces just the skeletal polylines for the flows. Once you have those, use your favorite GIS (e.g., QGIS at <a href="https://qgis.org" target="_blank">https://qgis.org</a>) to symbolize them, for example by drawing line or arrow widths according to the FlowMag attribute, as in the image at top.
 
