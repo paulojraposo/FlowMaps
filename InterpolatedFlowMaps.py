@@ -298,6 +298,7 @@ def main():
     parser.add_argument("-i", "--interpolator", help = "The type of interpolator to use. Options are 'cs' for cubic spline (the default), 'a' for Akima, and 'pchp' for PCHIP.")
     parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point. Expressed as a number between 0.0 and 1.0. Default is 0.5.")
     parser.add_argument("-d", "--dev", help = "The across-track distance at which a deviated point should be established from the straight-line vector between origin and destination points, expressed as a fraction of the straight line distance. Larger values make arcs more curved, while zero makes straight lines. Negative values result in right-handed curves. Default is 0.15.")
+    parser.add_argument("-s", "--straight", default = False, action = "store_true", help = "Draw straight flow lines. Equivalent to setting --dev to 0.0 and leaving --asf at default. Will cause any settings to those variables to be overruled.")
     parser.add_argument("-v", "--vpa", help = "The number of vertices the mapped arcs should each have. Must be greater than 3, but typically should be at least several dozen to a few hundred or so. Default is " + str(vertsPerArc) + ".")
     parser.add_argument("--ccw", default = False, action = "store_true",  help = "Sets the across-track deviation point on the left by rotating the across-track vector counter-clockwise. Changes the directions that arcs curve in. Default is clockwise.")
     parser.add_argument("--verbose", default = False, action = "store_true", help = "Be verbose while running, printing lots of status messages.")
@@ -334,13 +335,16 @@ def main():
         else:
             print("Didn't understand the specified interpolator type. Acceptable codes are {}. Exiting.".format(str(list(acceptedInterpolators.keys()))))
             exit()
-    if args.asf:
-        alongSegmentFraction = float(args.asf)
-        if alongSegmentFraction <= 0.0 or alongSegmentFraction >= 1.0:
-            print("Along-segment fraction {} is out of bounds, must be within 0.0 and 1.0. Exiting.".format(str(alongSegmentFraction)))
-            exit()
-    if args.dev:
-        devFraction = float(args.dev)
+    if not args.straight:
+        if args.asf:
+            alongSegmentFraction = float(args.asf)
+            if alongSegmentFraction <= 0.0 or alongSegmentFraction >= 1.0:
+                print("Along-segment fraction {} is out of bounds, must be within 0.0 and 1.0. Exiting.".format(str(alongSegmentFraction)))
+                exit()
+        if args.dev:
+            devFraction = float(args.dev)
+    else:
+        devFraction = 0.0
     if args.ccw:
         clockWise = False
     if args.verbose:
