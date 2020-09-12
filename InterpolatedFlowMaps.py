@@ -37,7 +37,7 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
 progName = "Interpolated Flow Maps"
-__version__ = "0.31, November 2019"
+__version__ = "0.32, September 2020"
 
 license = """
 # Under MIT License:
