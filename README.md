@@ -14,9 +14,9 @@ This Python script makes flow maps using mathematical interpolations between a s
 python InterpolatedFlowMaps.py -h
 ```
 
-Please note that the input CSV file must be in the format of the example below.  The headers seen below, named exactly as seen, must be present and unique in the input file, though other headers/columns may exist (these will be ignored). Sequencing of the headers does not matter. Strings throughout may be enclosed in double quotes.  FlowMag variables can have decimals, but don't necessarily need to be numbers (e.g., they could be strings like "high" or "low") - these values are simply copied to the output file.
+Please note that the input CSV file must be in the format of the example below.  The headers seen below, named exactly as seen, must be present and unique in the input file. Any other headers and fields may also exist, and will be copied to the output features as text fields. Sequencing of the headers does not matter.  Strings throughout may be enclosed in double quotes.  FlowMag values must be integer or decimal numbers.  To use textual magnitude data, such as strings like "high" or "low," simply use some other unique column to store these data in---they will be copied to the output file.
 
-All coordinate values must be latitude and longitude in WGS84.
+All given coordinate values must be latitude and longitude in WGS84.
 
 Example CSV:
 

@@ -18,7 +18,7 @@ You must supply the script with a csv file where each row represents an arc
 with a flow magnitude. Specific information about the required format of that
 csv file is in the README file acompanying this script.
 
-This is written for Python 3; it may not work on Python 2.
+This is written for Python 3.
 
 Written against versions (via the Anaconda Python distribution):
 Python 3.5.3
@@ -37,7 +37,7 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
 progName = "Interpolated Flow Maps"
-__version__ = "0.32, September 2020"
+__version__ = "1.0, October 2020"
 
 license = """
 # Under MIT License:
@@ -64,16 +64,6 @@ license = """
 """
 
 
-
-# Notes /////////////////////////////////////////////////////////////////////////////
-
-# TODO: Make script write any other attributes to output, too.
-#       Use DictReader's fieldnames attribute to get input file's fields.
-#       Need to revise how features are finally written to the output -
-#       that's got hard-coded queries for field values saved in dictionaries
-#       at the moment.
-
-# TODO: Allow user to skew curves.
 
 # Imports ///////////////////////////////////////////////////////////////////////////
 
@@ -269,18 +259,19 @@ def main():
     wgs84SR = osr.SpatialReference()
     wgs84SR.ImportFromProj4(epsgWGS84Proj4)
 
-    # EPSG:3785 Web Mercator - for default output.
+    # EPSG:3785 Web Mercator
     webMercatorRefURL = "https://spatialreference.org/ref/epsg/3785/" # Retrieved string below on 2017-06-01
     epsgWebMercProj4 = "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378137 +b=6378137 +towgs84=0,0,0,0,0,0,0 +no_defs" # manually removed +units=m
     wmSR = osr.SpatialReference()
     wmSR.ImportFromProj4(epsgWebMercProj4)
 
-    # Output field names
-    textFieldNames = ["Orig", "Dest"]
-    floatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon"]
+    # Required field names
+    requiredTextFieldNames = ["OrigName", "DestName"]
+    requiredFloatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon"]
+    requiredFieldNames = requiredTextFieldNames + requiredFloatFieldNames
 
     # Various default values
-    outP4 = epsgWebMercProj4
+    outP4 = epsgWGS84Proj4
     interpolator = "cs"
     alongSegmentFraction = 0.5
     devFraction = 0.15
@@ -290,11 +281,11 @@ def main():
     # gr = 0.25 / 1.618 # For the Golden Ratio, phi.
 
     # Usage messages, and parse command line arguments.
-    descString = progName + " -- " + "A script for making flow maps in GIS, using interpolated paths, by Paulo Raposo (pauloj.raposo@outlook.com).\nUnder MIT license. \nWritten for Python 3 - may not work on 2. Dependencies include: " + dependencies + "."
+    descString = progName + " -- " + "A script for making flow maps in GIS, using interpolated paths, by Paulo Raposo (pauloj.raposo@outlook.com).\n\nDependencies include: " + dependencies + "."
     parser = argparse.ArgumentParser(prog = progName, description = descString, formatter_class = argparse.RawDescriptionHelpFormatter)
     parser.add_argument("ROUTES", help = "CSV file specifying routes and magnitudes. Coordinates must be lat and lon in WGS84. Please see the README file for required formatting.")
     parser.add_argument("OUTPUTFILE", help = "File path and name for output shapefile. The containing directory must already exist. The file format is determined from the extension given here, with these options: .shp, .kml, .gml, .gmt, or .geojson.")
-    parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'https://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., https://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing (only) a Proj.4 string. Default output projection is Web Mercator (" + webMercatorRefURL + ").")
+    parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'https://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., https://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing only a Proj.4 string. Default output projection is plate carrée (i.e., equirectangular) in WGS84 (" + wgs84RefURL + ").")
     parser.add_argument("-i", "--interpolator", help = "The type of interpolator to use. Options are 'cs' for cubic spline (the default), 'a' for Akima, and 'pchp' for PCHIP.")
     parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point. Expressed as a number between 0.0 and 1.0. Default is 0.5.")
     parser.add_argument("-d", "--dev", help = "The across-track distance at which a deviated point should be established from the straight-line vector between origin and destination points, expressed as a fraction of the straight line distance. Larger values make arcs more curved, while zero makes straight lines. Negative values result in right-handed curves. Default is 0.15.")
@@ -360,7 +351,15 @@ def main():
     outSR = osr.SpatialReference()
     outSR.ImportFromProj4(outP4)
 
-    # Create an output file where the user specified, and add attribute fields to it.
+    # Open and read the input CSV to get all its fields. 
+    # Identify which fields are present beyond those that are required.
+    givenFieldNames = None 
+    with open(args.ROUTES) as csvfile:
+        dReader = csv.DictReader(csvfile, delimiter = ',', quotechar = '"')
+        givenFieldNames = dReader.fieldnames
+    otherFieldnames = [e for e in givenFieldNames if e not in requiredFieldNames]
+
+    # Create an output file where the user specified, and add all attribute fields to it.
     if verbose:
         print("Preparing file for output...")
     driver = ogr.GetDriverByName(ogrDriverName)
@@ -369,10 +368,12 @@ def main():
     fName = os.path.splitext(os.path.split(outFile)[1])[0]
     dst_layer = dst_ds.CreateLayer(fName, outSR, geom_type = ogr.wkbLineString)
     layer_defn = dst_layer.GetLayerDefn()
-    for field in textFieldNames:
+    for field in requiredTextFieldNames:
         createAField(dst_layer, field, ogr.OFTString)
-    for field in floatFieldNames:
+    for field in requiredFloatFieldNames:
         createAField(dst_layer, field, ogr.OFTReal)
+    for field in otherFieldnames:
+        createAField(dst_layer, field, ogr.OFTString)
 
     # Open and read the CSV.
     # Each row is an arc/route in the flow map. Process each row into a feature.
@@ -383,27 +384,18 @@ def main():
         # Reference fields by their headers; first row taken for headers by default.
         # Find every unique origin point, and separate arcs into groups by origin point,
         # stored in a dictionary.
-        originGroups = {} # Entries return lists of lists.
+        originGroups = {}
         originKeys = []
 
         for row in dReader: # Populate originGroups.
 
-            # These strings are the headers (and fields) the input csv must have.
-            oName  =  row["OrigName"]
-            oLat   =  row["OrigLat"]
-            oLon   =  row["OrigLon"]
-            dName  =  row["DestName"]
-            dLat   =  row["DestLat"]
-            dLon   =  row["DestLon"]
-            floMag =  row["FlowMag"]
-
-            thisRecordStrings = [oName, oLat, oLon, dName, dLat, dLon, floMag]
-            thisOrigin = (float(thisRecordStrings[1]), float(thisRecordStrings[2]))
+            thisOrigin = (float(row["OrigLat"]), float(row["OrigLon"]))
+            
             if thisOrigin not in originGroups: # Make new dictionary entry if new.
                 originGroups[thisOrigin] = []
                 originKeys.append(thisOrigin)
             # Whether new or not, append this record to the values of its key.
-            originGroups[thisOrigin].append(thisRecordStrings)
+            originGroups[thisOrigin].append(row)
 
         for ok in originKeys:
 
@@ -412,10 +404,10 @@ def main():
             for a in theseArcs:
 
                 if verbose:
-                    print(str(a[0]) + " to " + str(a[3]) + "..." )
+                    print(str(a["OrigName"]) + " to " + str(a["DestName"]))
 
                 originLatLon = ok # lat, lon
-                destinLatLon = (float(a[4]), float(a[5])) # lat, lon
+                destinLatLon = (float(a["DestLat"]), float(a["DestLon"])) # lat, lon
 
                 # Convert these lat lon pairs to x,y in the outbound projected coordinate system, using pyproj.
                 xOrigOut, yOrigOut = pOut(originLatLon[1], originLatLon[0])
@@ -511,16 +503,11 @@ def main():
                     rectV = rrpV + orgV
                     aPoint = (rectV[0], rectV[1])
                     rectifiedPoints.append(aPoint)
-                # Finally, build a line with this list of vertices, carrying over
-                # the FlowMag attribute, and write to file.
+                # Finally, build a line with this list of vertices, carrying over attributes,
+                # and write to file.
                 anArc = ogr.Feature(layer_defn)
-                anArc.SetField( textFieldNames[0], a[0]) # origin
-                anArc.SetField( textFieldNames[1], a[3]) # destination
-                anArc.SetField(floatFieldNames[0], a[6]) # flow
-                anArc.SetField(floatFieldNames[1], a[1]) # origin lat
-                anArc.SetField(floatFieldNames[2], a[2]) # origin lon
-                anArc.SetField(floatFieldNames[3], a[4]) # destination lat
-                anArc.SetField(floatFieldNames[4], a[5]) # destination lon
+                for fld in givenFieldNames:
+                    anArc.SetField(fld, a[fld])
                 lineGeometry = createLineString(rectifiedPoints) # actually create the line
                 anArc.SetGeometry(lineGeometry)
                 dst_layer.CreateFeature(anArc)
