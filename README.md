@@ -46,7 +46,7 @@ Ponta Delgada,37.7483018179,-25.6665834976,Knoxville,35.9700124298,-83.920030356
 1. Download the InterpolatedFlowMaps.py and testdata.csv files from this repository.  
 2. I recommend using Anaconda as a Python package manager. Install Anaconda (or Miniconda). If you've already got it, skip this step. See https://www.anaconda.com/distribution/.  
 3. In a terminal, create a conda environment called `tryflows` with the necessary packages:  
-`conda create -n tryflows python=3.5 scipy gdal shapely pyproj`
+`conda create -n tryflows python=3 scipy gdal shapely pyproj`
 4. Activate your conda environment:  
 `conda activate tryflows`  
 5. Navigate to the folder where you’ve downloaded the .py file, e.g.,  

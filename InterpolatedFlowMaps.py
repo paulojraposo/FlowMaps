@@ -20,7 +20,7 @@ csv file is in the README file acompanying this script.
 
 This is written for Python 3.
 
-Written against versions (via the Anaconda Python distribution):
+Originally written against versions (via the Anaconda Python distribution):
 Python 3.5.3
 scipy 0.19.0
 gdal 2.1.0
