@@ -37,31 +37,7 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
 progName = "Interpolated Flow Maps"
-__version__ = "1.0, October 2020"
-
-license = """
-# Under MIT License:
-#
-# Copyright (c) 2018 Paulo Raposo, Ph.D. - pauloj.raposo@outlook.com
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-"""
+__version__ = "1.1, August 2022"
 
 
 
@@ -101,13 +77,39 @@ except ImportError:
     the library or use a Python environment with scipy installed. Exiting.""")
     exit()
 
-import os, csv, argparse, math
+import os
+import csv
+import argparse
+import math
 from urllib import request
 import numpy as np
-# import datetime, logging
+# import datetime
+# import logging
 
 
-# Functions & Classes ///////////////////////////////////////////////////////////////////
+
+# Constants, defaults, etc. /////////////////////////////////////////////////////
+
+# EPSG:4326 WGS 84 - for required input.
+wgs84RefURL = "https://spatialreference.org/ref/epsg/4326/" # Retrieved string below on 2017-06-01
+epsgWGS84Proj4 = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+# wgs84SR = osr.SpatialReference()
+# wgs84SR.ImportFromProj4(epsgWGS84Proj4)
+
+# EPSG:3785 Web Mercator
+webMercatorRefURL = "https://spatialreference.org/ref/epsg/3785/" # Retrieved string below on 2017-06-01
+epsgWebMercProj4 = "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378137 +b=6378137 +towgs84=0,0,0,0,0,0,0 +no_defs" # manually removed +units=m
+# wmSR = osr.SpatialReference()
+# wmSR.ImportFromProj4(epsgWebMercProj4)
+
+# Required field names
+requiredTextFieldNames = ["OrigName", "DestName"]
+requiredFloatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon"]
+requiredFieldNames = requiredTextFieldNames + requiredFloatFieldNames
+
+
+
+# Functions & Classes ///////////////////////////////////////////////////////////////
 
 def calcOrthogonalVector(aVector, clockwise):
     """Given a 2-vector (i.e., a numpy 2D array), this returns the orthogonal
@@ -136,7 +138,7 @@ def generateInterpolator(xSeries, ySeries, aType):
     'pchip' for PCHIP."""
     interpo = acceptedInterpolators[aType]
     if interpo == CubicSpline:
-        # Boundary Conditions are crucial to shape here!!!!
+        # Boundary Conditions are crucial to shape here!
         # TODO: study these and do something smart here using first and second derivatives at line ends.
         # see https://docs.scipy.org/doc/scipy-0.18.1/reference/generated/scipy.interpolate.CubicSpline.html
         i = interpo(xSeries, ySeries, bc_type=((2, 0.0), (2, 0.0))) # A 'natural' spline, with second derivatives at ends = 0.0.
@@ -189,8 +191,7 @@ def filterProj4String(p4string):
 
     def should_keep_flag(flag, should_remove_ellps):
         """
-        Determines if a flag should be kept
-        in the string.
+        Determines if a flag should be kept in the string.
         """
         if flag.startswith("+units="):
             return False
@@ -210,15 +211,8 @@ def filterProj4String(p4string):
 
     # Return the final filtered Proj4 string
     outstring = " ".join(flags)
-    print("String returned: {}".format(outstring))
+    print(f"String returned: {outstring}")
     return outstring
-
-class LicenseAction(argparse.Action):
-    """A custom action to get the license to print, and then exit."""
-    def __init__(self, nargs=0, **kw):
-        super().__init__(nargs=nargs, **kw)
-    def __call__(self, parser, namespace, values, option_string=None):
-        print(license)
 
 
 # The acceptable values for interpolator types as code and SciPy method pairs.
@@ -240,113 +234,102 @@ typesAndDrivers = {
     ".gmt":     "GMT"
 }
 
+# Various default values
+outP4 = epsgWGS84Proj4
+interpolator = "cs"
+alongSegmentFraction = 0.5
+devFraction = 0.15
+vertsPerArc = 300
+clockWise = True
+be_verbose = False
+# gr = 0.25 / 1.618 # For the Golden Ratio, phi.
 
-# Script /////////////////////////////////////////////////////////////////////////////////
 
-def main():
+
+# Script ////////////////////////////////////////////////////////////////////////////
+
+def main(
+    routes,
+    output_file,
+    out_proj4,
+    interp_method,
+    asf,
+    dev,
+    straight,
+    vpa,
+    ccw,
+    verbose
+    ):
 
     """The main method of this script, for making flow maps, hot and fresh
      to your table (or desk), all flowy and map-like - that's amore!"""
 
-    # Constants, defaults, etc. /////////////////////////////////////////////////////////
+
+    # Various default values
+    global outP4
+    global interpolator
+    global alongSegmentFraction
+    global devFraction
+    global vertsPerArc
+    global clockWise
+    global be_verbose
+    # gr = 0.25 / 1.618 # For the Golden Ratio, phi.
+
 
     # Set up error handler for GDAL
     gdal.PushErrorHandler(gdal_error_handler)
 
-    # EPSG:4326 WGS 84 - for required input.
-    wgs84RefURL = "https://spatialreference.org/ref/epsg/4326/" # Retrieved string below on 2017-06-01
-    epsgWGS84Proj4 = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
-    wgs84SR = osr.SpatialReference()
-    wgs84SR.ImportFromProj4(epsgWGS84Proj4)
-
-    # EPSG:3785 Web Mercator
-    webMercatorRefURL = "https://spatialreference.org/ref/epsg/3785/" # Retrieved string below on 2017-06-01
-    epsgWebMercProj4 = "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378137 +b=6378137 +towgs84=0,0,0,0,0,0,0 +no_defs" # manually removed +units=m
-    wmSR = osr.SpatialReference()
-    wmSR.ImportFromProj4(epsgWebMercProj4)
-
-    # Required field names
-    requiredTextFieldNames = ["OrigName", "DestName"]
-    requiredFloatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon"]
-    requiredFieldNames = requiredTextFieldNames + requiredFloatFieldNames
-
-    # Various default values
-    outP4 = epsgWGS84Proj4
-    interpolator = "cs"
-    alongSegmentFraction = 0.5
-    devFraction = 0.15
-    vertsPerArc = 300
-    clockWise = True
-    verbose = False
-    # gr = 0.25 / 1.618 # For the Golden Ratio, phi.
-
-    # Usage messages, and parse command line arguments.
-    descString = progName + " -- " + "A script for making flow maps in GIS, using interpolated paths, by Paulo Raposo (pauloj.raposo@outlook.com).\n\nDependencies include: " + dependencies + "."
-    parser = argparse.ArgumentParser(prog = progName, description = descString, formatter_class = argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("ROUTES", help = "CSV file specifying routes and magnitudes. Coordinates must be lat and lon in WGS84. Please see the README file for required formatting.")
-    parser.add_argument("OUTPUTFILE", help = "File path and name for output shapefile. The containing directory must already exist. The file format is determined from the extension given here, with these options: .shp, .kml, .gml, .gmt, or .geojson.")
-    parser.add_argument("--outproj4", help = "Output projected coordinate system to draw flow arcs in, given as a Proj.4 string. Often available at spatialreference.org. Three input formats are acceptable: a Proj.4 string, a URL starting with 'https://' to the Proj.4 string for a coodinate system on spatialreference.org (e.g., https://spatialreference.org/ref/esri/53012/proj4/), or a full path to a plain text file containing only a Proj.4 string. Default output projection is plate carrée (i.e., equirectangular) in WGS84 (" + wgs84RefURL + ").")
-    parser.add_argument("-i", "--interpolator", help = "The type of interpolator to use. Options are 'cs' for cubic spline (the default), 'a' for Akima, and 'pchp' for PCHIP.")
-    parser.add_argument("-a", "--asf", help = "The 'along-segment fraction' of the straight line segment between start and end points of a flow at which an orthogonal vector will be found to construct the deviation point. Expressed as a number between 0.0 and 1.0. Default is 0.5.")
-    parser.add_argument("-d", "--dev", help = "The across-track distance at which a deviated point should be established from the straight-line vector between origin and destination points, expressed as a fraction of the straight line distance. Larger values make arcs more curved, while zero makes straight lines. Negative values result in right-handed curves. Default is 0.15.")
-    parser.add_argument("-s", "--straight", default = False, action = "store_true", help = "Draw straight flow lines. Equivalent to setting --dev to 0.0 and leaving --asf at default. Will cause any settings to those variables to be overruled.")
-    parser.add_argument("-v", "--vpa", help = "The number of vertices the mapped arcs should each have. Must be greater than 3, but typically should be at least several dozen to a few hundred or so. Default is " + str(vertsPerArc) + ".")
-    parser.add_argument("--ccw", default = False, action = "store_true",  help = "Sets the across-track deviation point on the left by rotating the across-track vector counter-clockwise. Changes the directions that arcs curve in. Default is clockwise.")
-    parser.add_argument("--verbose", default = False, action = "store_true", help = "Be verbose while running, printing lots of status messages.")
-    parser.add_argument("--version", action = "version", version = "%(prog)s " + __version__)
-    parser.add_argument("--license", action = LicenseAction, nargs = 0, help = "Print the script's license and exit.")
-    #
-    args = parser.parse_args()
-
     # Set variables, do various checks on input arguments.
-    pathAndFile, ext = os.path.splitext(args.OUTPUTFILE)
+    ext = os.path.splitext(output_file)[1]
     try:
         ogrDriverName = typesAndDrivers[ext.lower()]
     except:
-        print("Output file must be of one of these types: {}. Exiting.".format(str(list(typesAndDrivers.keys()))))
+        print(f"Output file must be of one of these types: {str(list(typesAndDrivers.keys()))}. Exiting.")
         exit()
-    if args.vpa:
-        vertsPerArc = args.vpa
-    if args.outproj4:
-        if args.outproj4.startswith("https://"):
+    if vpa:
+        vertsPerArc = int(vpa)
+    if out_proj4:
+        if out_proj4.startswith("https://"):
             # URL.
-            f = request.urlopen(args.outproj4)
-            outP4 = filterProj4String( str(f.read(), "utf-8") ) # Decode from byte string.
-        elif os.path.exists(args.outproj4):
+            f = request.urlopen(out_proj4)
+            outP4 = filterProj4String(str(f.read(), "utf-8")) # Decode from byte string.
+        elif os.path.exists(out_proj4):
             # Assuming a path to a text file has been passed in.
-            f = open(args.outproj4)
-            outP4 = filterProj4String( f.read() )
+            f = open(out_proj4)
+            outP4 = filterProj4String(f.read())
             f.close()
         else:
             # Proj.4 string.
-            outP4 = filterProj4String( args.outproj4 )
-    if args.interpolator:
-        if args.interpolator in acceptedInterpolators.keys():
-            interpolator = args.interpolator
+            outP4 = filterProj4String(out_proj4)
+    else:
+        outP4 = epsgWGS84Proj4
+    if interp_method:
+        if interp_method in acceptedInterpolators.keys():
+            interpolator = interp_method
         else:
-            print("Didn't understand the specified interpolator type. Acceptable codes are {}. Exiting.".format(str(list(acceptedInterpolators.keys()))))
+            print(f"Didn't understand the specified interpolator type. Acceptable codes are {str(list(acceptedInterpolators.keys()))}. Exiting.")
             exit()
-    if not args.straight:
-        if args.asf:
-            alongSegmentFraction = float(args.asf)
+    if not straight:
+        if asf:
+            alongSegmentFraction = float(asf)
             if alongSegmentFraction <= 0.0 or alongSegmentFraction >= 1.0:
-                print("Along-segment fraction {} is out of bounds, must be within 0.0 and 1.0. Exiting.".format(str(alongSegmentFraction)))
+                print(f"Along-segment fraction {str(alongSegmentFraction)} is out of bounds, must be within 0.0 and 1.0. Exiting.")
                 exit()
-        if args.dev:
-            devFraction = float(args.dev)
+        if dev:
+            devFraction = float(dev)
     else:
         devFraction = 0.0
-    if args.ccw:
+    if ccw:
         clockWise = False
-    if args.verbose:
-        verbose = True
+    if verbose:
+        be_verbose = True
 
     # Build the necessary coordinate systems.
     pIn = Proj(epsgWGS84Proj4)
     try:
         pOut = Proj(outP4)
     except:
-        print("Unable to define projection from input provided for Proj4. Please ensure the string is valid. Exiting.")
+        print(f"Unable to define projection from input provided for Proj4:\n  {outP4}\nPlease ensure the string is valid. Exiting.")
         exit()
     outSR = osr.SpatialReference()
     outSR.ImportFromProj4(outP4)
@@ -354,18 +337,17 @@ def main():
     # Open and read the input CSV to get all its fields. 
     # Identify which fields are present beyond those that are required.
     givenFieldNames = None 
-    with open(args.ROUTES) as csvfile:
+    with open(routes) as csvfile:
         dReader = csv.DictReader(csvfile, delimiter = ',', quotechar = '"')
         givenFieldNames = dReader.fieldnames
     otherFieldnames = [e for e in givenFieldNames if e not in requiredFieldNames]
 
     # Create an output file where the user specified, and add all attribute fields to it.
-    if verbose:
-        print("Preparing file for output...")
+    if be_verbose:
+        print(f"Preparing {output_file} for output...")
     driver = ogr.GetDriverByName(ogrDriverName)
-    outFile = args.OUTPUTFILE
-    dst_ds = driver.CreateDataSource(outFile)
-    fName = os.path.splitext(os.path.split(outFile)[1])[0]
+    dst_ds = driver.CreateDataSource(output_file)
+    fName = os.path.splitext(os.path.split(output_file)[1])[0]
     dst_layer = dst_ds.CreateLayer(fName, outSR, geom_type = ogr.wkbLineString)
     layer_defn = dst_layer.GetLayerDefn()
     for field in requiredTextFieldNames:
@@ -377,15 +359,17 @@ def main():
 
     # Open and read the CSV.
     # Each row is an arc/route in the flow map. Process each row into a feature.
-    if verbose:
-        print("Reading csv...")
-    with open(args.ROUTES) as csvfile:
+    if be_verbose:
+        print("Reading input .csv file...")
+    with open(routes) as csvfile:
         dReader = csv.DictReader(csvfile, delimiter = ',', quotechar = '"')
         # Reference fields by their headers; first row taken for headers by default.
         # Find every unique origin point, and separate arcs into groups by origin point,
         # stored in a dictionary.
         originGroups = {}
         originKeys = []
+
+        flow_rows = 0
 
         for row in dReader: # Populate originGroups.
 
@@ -397,14 +381,24 @@ def main():
             # Whether new or not, append this record to the values of its key.
             originGroups[thisOrigin].append(row)
 
+            flow_rows += 1
+
+        if be_verbose:
+            print(f"{flow_rows} rows of flow data read in the .csv file.")
+        
+        iteration = 1
+
         for ok in originKeys:
 
             theseArcs = originGroups[ok]
 
             for a in theseArcs:
 
-                if verbose:
-                    print(str(a["OrigName"]) + " to " + str(a["DestName"]))
+                if be_verbose:
+                    print("Working on " 
+                        f"{str(iteration)} of {flow_rows}, "
+                        f'{str(a["OrigName"])} to {str(a["DestName"])}.'
+                    )
 
                 originLatLon = ok # lat, lon
                 destinLatLon = (float(a["DestLat"]), float(a["DestLon"])) # lat, lon
@@ -513,15 +507,105 @@ def main():
                 dst_layer.CreateFeature(anArc)
                 anArc = None # Free resources, finish this route.
 
+                iteration += 1
+
     dst_ds = None # Destroy the data source to free resouces and finish writing.
 
-    print("Finished, output written to: " + outFile)
+    print("Finished, output written to: " + output_file)
 
 
-# Main module check /////////////////////////////////////////////////////////////////////
+# Main module check, command line arguments /////////////////////////////////////////
 
 if __name__ == '__main__':
-    main()
+    
+    # Usage messages, and parse command line arguments.
+    descString = f"{progName}. A script for making flow maps in GIS, using interpolated paths. By Paulo Raposo (pauloj.raposo@outlook.com).\n\nDependencies include: {dependencies}."
+    parser = argparse.ArgumentParser(
+        prog=progName, 
+        description=descString, 
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("ROUTES", 
+        help="CSV file specifying routes and magnitudes. Coordinates "
+        "must be lat and lon in WGS84. Please see the README file for "
+        "required formatting."
+    )
+    parser.add_argument("OUTPUTFILE", 
+        help="File path and name for output shapefile. The containing "
+        "directory must already exist. The file format is determined "
+        "from the extension given here, with these options: .shp, .kml, "
+        ".gml, .gmt, or .geojson."
+    )
+    parser.add_argument("--outproj4", 
+        help="Output projected coordinate system to draw flow arcs in, "
+        "given as a Proj.4 string. Often available at "
+        "spatialreference.org. Three input formats are acceptable: a "
+        "Proj.4 string, a URL starting with 'https://' to the Proj.4 "
+        "string for a coodinate system on spatialreference.org (e.g., "
+        "https://spatialreference.org/ref/esri/53012/proj4/), or a "
+        "full path to a plain text file containing only a Proj.4 "
+        "string. Default output projection is plate carrée (i.e., "
+        "equirectangular) in WGS84 (" + wgs84RefURL + ")."
+    )
+    parser.add_argument("-i", "--interpolator", 
+        help="The type of interpolator to use. Options are 'cs' for cubic "
+        "spline (the default), 'a' for Akima, and 'pchp' for PCHIP."
+    )
+    parser.add_argument("-a", "--asf", 
+        help="The 'along-segment fraction' of the straight line segment "
+        "between start and end points of a flow at which an orthogonal "
+        "vector will be found to construct the deviation point. "
+        "Expressed as a number between 0.0 and 1.0. Default is 0.5."
+    )
+    parser.add_argument("-d", "--dev", 
+        help="The across-track distance at which a deviated point should "
+        "be established from the straight-line vector between origin and "
+        "destination points, expressed as a fraction of the straight line "
+        "distance. Larger values make arcs more curved, while zero makes "
+        "straight lines. Negative values result in right-handed curves. "
+        "Default is 0.15."
+    )
+    parser.add_argument("-s", "--straight", 
+        default=False, 
+        action="store_true", 
+        help="Draw straight flow lines. Equivalent to setting --dev to 0.0 "
+        "and leaving --asf at default. Will cause any settings to those "
+        "variables to be overruled."
+    )
+    parser.add_argument("-v", "--vpa", 
+        help="The number of vertices the mapped arcs should each have. "
+        "Must be greater than 3, but typically should be at least several "
+        f"dozen to a few hundred or so. Default is {str(vertsPerArc)}."
+    )
+    parser.add_argument("--ccw", 
+        default=False, 
+        action="store_true", 
+        help="Sets the across-track deviation point on the left by "
+        "rotating the across-track vector counter-clockwise. Changes the "
+        "directions that arcs curve in. Default is clockwise."
+    )
+    parser.add_argument("--verbose", 
+        default=False, 
+        action="store_true", 
+        help="Be verbose while running, printing lots of status messages."
+    )
+    parser.add_argument("--version", 
+        action="version", 
+        version=f"%(prog)s {__version__}."
+    )
+    
+    args = parser.parse_args()
 
+    main(
+        args.ROUTES,
+        args.OUTPUTFILE,
+        args.outproj4,
+        args.interpolator,
+        args.asf,
+        args.dev,
+        args.straight,
+        args.vpa,
+        args.ccw,
+        args.verbose
+    )
 
-# fin
