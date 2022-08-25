@@ -14,23 +14,23 @@ This Python script makes flow maps using mathematical interpolations between a s
 python InterpolatedFlowMaps.py -h
 ```
 
-Please note that the input CSV file must be in the format of the example below.  The headers seen below, named exactly as seen, must be present and unique in the input file. Any other headers and fields may also exist, and will be copied to the output features as text fields. Sequencing of the headers does not matter.  Strings throughout may be enclosed in double quotes.  FlowMag values must be integer or decimal numbers.  To use textual magnitude data, such as strings like "high" or "low," simply use some other unique column to store these data in---they will be copied to the output file.
+Please note that the input CSV file must be in the format of the example below.  The headers seen below, named exactly as seen, must be present and unique in the input file; any other headers and fields may also exist, and will be copied to the output features as text fields. The sequencing of the headers does not matter.  Text strings throughout may be enclosed in double quotes.  FlowMag values must be integer or decimal numbers.  To use textual magnitude data like "high" or "low," simply use some other unique column to store these data in---they will be copied to the output file.
 
-All given coordinate values must be latitude and longitude in WGS84.
+All given coordinate values must be latitude and longitude in WGS84 (the same coordinate system used my most online maps, and the GPS system).
 
 Example CSV:
 
 <pre>
 OrigName,OrigLat,OrigLon,DestName,DestLat,DestLon,FlowMag
-Ponta Delgada,37.7483018179,-25.6665834976,Lisbon,38.7227228779,-9.1448663055,6013
-Ponta Delgada,37.7483018179,-25.6665834976,Los Angeles,33.9899782502,-118.179980511,1661
-Ponta Delgada,37.7483018179,-25.6665834976,Coimbra,40.2003743683,-8.41668034,2259
-Ponta Delgada,37.7483018179,-25.6665834976,Christchurch,-43.5350313123,172.630020711,4656
-Ponta Delgada,37.7483018179,-25.6665834976,Toronto,43.6999798778,-79.4200207944,584
-Ponta Delgada,37.7483018179,-25.6665834976,Kyoto,35.0299922882,135.749997924,282
-Ponta Delgada,37.7483018179,-25.6665834976,Yokohama,35.3200262645,139.58004838,6985
-Ponta Delgada,37.7483018179,-25.6665834976,Durban,-29.8650130017,30.9800105374,4981
-Ponta Delgada,37.7483018179,-25.6665834976,Knoxville,35.9700124298,-83.9200303566,1235
+Ponta Delgada,37.7483018179,-25.6665834976,Lisbon,38.722722,-9.144866,6013
+Ponta Delgada,37.7483018179,-25.6665834976,Los Angeles,33.9899782,-118.179980,1661
+Ponta Delgada,37.7483018179,-25.6665834976,Coimbra,40.200374,-8.416680,2259
+Ponta Delgada,37.7483018179,-25.6665834976,Christchurch,-43.535031,172.630020,4656
+Ponta Delgada,37.7483018179,-25.6665834976,Toronto,43.699979,-79.420020,584
+Ponta Delgada,37.7483018179,-25.6665834976,Kyoto,35.029992,135.749997,282
+Ponta Delgada,37.7483018179,-25.6665834976,Yokohama,35.320026,139.580048,6985
+Ponta Delgada,37.7483018179,-25.6665834976,Durban,-29.865013,30.980010,4981
+Ponta Delgada,37.7483018179,-25.6665834976,Knoxville,35.970012,-83.920030,1235
 </pre>
 
 ## Dependencies
