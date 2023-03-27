@@ -37,7 +37,7 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
 progName = "Interpolated Flow Maps"
-__version__ = "1.1, August 2022"
+__version__ = "2.0, March 2023"
 
 
 
@@ -104,7 +104,7 @@ epsgWebMercProj4 = "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378137 +b=6378137
 
 # Required field names
 requiredTextFieldNames = ["OrigName", "DestName"]
-requiredFloatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon"]
+requiredFloatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon", "Dev", "SegFract", "Opp", "Straight"]
 requiredFieldNames = requiredTextFieldNames + requiredFloatFieldNames
 
 
@@ -415,16 +415,32 @@ def main(
                 # Straight-line route as a vector starting at coord system origin is second vertex minus first.
                 routeVector = np.array([destMapVert[0], destMapVert[1]]) - np.array([origMapVert[0], origMapVert[1]])
 
-                # get along-track fraction of line as vector.
-                alongTrackVector = routeVector * alongSegmentFraction
+                # Get along-track fraction of line as vector.
+                # Handle per-arc custom SegmentFraction values.
+                if a["SegFract"]:
+                    alongTrackVector = routeVector * float(a["SegFract"])
+                else:
+                    alongTrackVector = routeVector * alongSegmentFraction
 
                 # The user-set fraction of the arc distance for point dev.
-                deviationVector = routeVector * devFraction
+                # Handle per-arc custom Deviation values.
+                if a["Dev"]:
+                    deviationVector = routeVector * float(a["Dev"])
+                else:
+                    deviationVector = routeVector * devFraction
+
+                # Handle per-arc Straight values. Override the deviationVector.
+                if a["Straight"]:
+                    deviationVector = routeVector * 0.0
 
                 # Get the left-handed orthogonal vector of this.
-                orthogVector = calcOrthogonalVector(deviationVector, clockWise)
+                # Handle per-arc custom Opp values to reverse direction.
+                if a["Opp"]:
+                    orthogVector = calcOrthogonalVector(deviationVector, not clockWise)
+                else:
+                    orthogVector = calcOrthogonalVector(deviationVector, clockWise)
 
-                # dev point is at the origin point + aMidpointVector + orthogVector
+                # dev point is at the origin point + alongTrackVector + orthogVector.
                 devPointVector = np.array([origMapVert[0], origMapVert[1]]) + alongTrackVector + orthogVector
                 devMapVert = (devPointVector[0], devPointVector[1])
 
@@ -474,7 +490,7 @@ def main(
                 xRange = series_x[2] - series_x[0]
                 anInterval = xRange / vertsPerArc
                 # xValues = np.linspace(series_x[0], series_x[2], num=anInterval, endpoint=True) # works, but slower by far than np.append()
-                xValues = np.append( np.arange(series_x[0], series_x[2], anInterval), series_x[2] )
+                xValues = np.append(np.arange(series_x[0], series_x[2], anInterval), series_x[2])
                 # NB: This leaves the dev point behind! We should have many others near it though,
                 # or it could be inserted into the sequence here.
                 #
@@ -527,8 +543,8 @@ if __name__ == '__main__':
     )
     parser.add_argument("ROUTES", 
         help="CSV file specifying routes and magnitudes. Coordinates "
-        "must be lat and lon in WGS84. Please see the README file for "
-        "required formatting."
+        "must be decimal lat and lon in WGS84. Please see the README "
+        "file for required formatting."
     )
     parser.add_argument("OUTPUTFILE", 
         help="File path and name for output shapefile. The containing "
@@ -538,32 +554,32 @@ if __name__ == '__main__':
     )
     parser.add_argument("--outproj4", 
         help="Output projected coordinate system to draw flow arcs in, "
-        "given as a Proj.4 string. Often available at "
+        "expressed as a Proj.4 string. Often available at "
         "spatialreference.org. Three input formats are acceptable: a "
         "Proj.4 string, a URL starting with 'https://' to the Proj.4 "
         "string for a coodinate system on spatialreference.org (e.g., "
         "https://spatialreference.org/ref/esri/53012/proj4/), or a "
         "full path to a plain text file containing only a Proj.4 "
-        "string. Default output projection is plate carrée (i.e., "
+        "string. The default output projection is plate carrée (i.e., "
         "equirectangular) in WGS84 (" + wgs84RefURL + ")."
     )
     parser.add_argument("-i", "--interpolator", 
         help="The type of interpolator to use. Options are 'cs' for cubic "
-        "spline (the default), 'a' for Akima, and 'pchp' for PCHIP."
+        "spline (the default), 'a' for Akima, and 'pchip' for PCHIP."
     )
-    parser.add_argument("-a", "--asf", 
+    parser.add_argument("-sf", "--segfract", 
         help="The 'along-segment fraction' of the straight line segment "
         "between start and end points of a flow at which an orthogonal "
         "vector will be found to construct the deviation point. "
-        "Expressed as a number between 0.0 and 1.0. Default is 0.5."
+        "Expressed as a number above 0.0 and below 1.0. The default is 0.5."
     )
     parser.add_argument("-d", "--dev", 
         help="The across-track distance at which a deviated point should "
         "be established from the straight-line vector between origin and "
         "destination points, expressed as a fraction of the straight line "
-        "distance. Larger values make arcs more curved, while zero makes "
-        "straight lines. Negative values result in right-handed curves. "
-        "Default is 0.15."
+        "distance. Larger values make arcs more curved, zero makes "
+        "straight lines, and negative values result in right-handed "
+        "curves. The default is 0.15."
     )
     parser.add_argument("-s", "--straight", 
         default=False, 
@@ -601,7 +617,7 @@ if __name__ == '__main__':
         args.OUTPUTFILE,
         args.outproj4,
         args.interpolator,
-        args.asf,
+        args.segfract,
         args.dev,
         args.straight,
         args.vpa,
