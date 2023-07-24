@@ -45,7 +45,7 @@ The last four fields given above must exist, but can be empty. These are optiona
 ## Getting Started
 
 1. Download the InterpolatedFlowMaps.py and testdata.csv files from this repository.  
-2. I recommend using Anaconda as a Python package manager. Install Anaconda (or Miniconda). If you've already got it, skip this step. See https://www.anaconda.com/distribution/.  
+2. I recommend using Anaconda as a Python package manager. Install Anaconda (or Miniconda). If you've already got it, skip this step. See [https://docs.conda.io/projects/conda/en/latest/user-guide/install/download.html](https://docs.conda.io/projects/conda/en/latest/user-guide/install/download.html).  
 3. In a terminal, create a conda environment called `tryflows` with the necessary packages:  
 `conda create -n tryflows python=3 scipy gdal shapely pyproj`
 4. Activate your conda environment:  
