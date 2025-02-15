@@ -37,7 +37,7 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
 progName = "Interpolated Flow Maps"
-__version__ = "2.0, March 2023"
+__version__ = "3.0, February 2025"
 
 
 
@@ -106,6 +106,35 @@ epsgWebMercProj4 = "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378137 +b=6378137
 requiredTextFieldNames = ["OrigName", "DestName"]
 requiredFloatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon", "Dev", "SegFract", "Opp", "Straight"]
 requiredFieldNames = requiredTextFieldNames + requiredFloatFieldNames
+
+# The acceptable values for interpolator types as code and SciPy method pairs.
+acceptedInterpolators = {
+    "cs":    CubicSpline,
+    "a":     Akima1DInterpolator,
+    "pchip": PchipInterpolator
+}
+
+# The acceptable output file types by file extension and their driver names for OGR.
+# These are a hand-picked subset of these: http://gdal.org/1.11/ogr/ogr_formats.html.
+# These are chosen mainly because they're available in OGR by default (i.e., OGR is
+# compiled supporting them by default), and they carry attribute fields over well.
+typesAndDrivers = {
+    ".shp":     "ESRI Shapefile",
+    ".geojson": "GeoJSON",
+    ".kml":     "KML",
+    ".gml":     "GML",
+    ".gmt":     "GMT"
+}
+
+# Various default values
+outP4 = epsgWGS84Proj4
+interpolator = "cs"
+alongSegmentFraction = 0.5
+devFraction = 0.15
+vertsPerArc = 300
+clockWise = True
+be_verbose = False
+# gr = 0.25 / 1.618 # For the Golden Ratio, phi.
 
 
 
@@ -214,35 +243,122 @@ def filterProj4String(p4string):
     print(f"String returned: {outstring}")
     return outstring
 
+def plot_dev_point(orig_vert, dest_vert, seg_fract, dev, straight, opposite):
 
-# The acceptable values for interpolator types as code and SciPy method pairs.
-acceptedInterpolators = {
-    "cs":    CubicSpline,
-    "a":     Akima1DInterpolator,
-    "pchip": PchipInterpolator
-}
+    ## Find the "dev" point for defining an interpolator, using vector geometry.
 
-# The acceptable output file types by file extension and their driver names for OGR.
-# These are a hand-picked subset of these: http://gdal.org/1.11/ogr/ogr_formats.html.
-# These are chosen mainly because they're available in OGR by default (i.e., OGR is
-# compiled supporting them by default), and they carry attribute fields over well.
-typesAndDrivers = {
-    ".shp":     "ESRI Shapefile",
-    ".geojson": "GeoJSON",
-    ".kml":     "KML",
-    ".gml":     "GML",
-    ".gmt":     "GMT"
-}
+    # Straight-line route as a vector starting at coord system origin is second vertex minus first.
+    routeVector = np.array([dest_vert[0], dest_vert[1]]) - np.array([orig_vert[0], orig_vert[1]])
 
-# Various default values
-outP4 = epsgWGS84Proj4
-interpolator = "cs"
-alongSegmentFraction = 0.5
-devFraction = 0.15
-vertsPerArc = 300
-clockWise = True
-be_verbose = False
-# gr = 0.25 / 1.618 # For the Golden Ratio, phi.
+    # Get along-track fraction of line as vector.
+    # Handle per-arc custom SegmentFraction values.
+    if seg_fract:
+        alongTrackVector = routeVector * float(seg_fract)
+    else:
+        alongTrackVector = routeVector * alongSegmentFraction
+
+    # The user-set fraction of the arc distance for point dev.
+    # Handle per-arc custom Deviation values.
+    if dev:
+        deviationVector = routeVector * float(dev)
+    else:
+        deviationVector = routeVector * devFraction
+
+    # Handle per-arc Straight values. Override the deviationVector.
+    if straight:
+        deviationVector = routeVector * 0.0
+
+    # Get the left-handed orthogonal vector of this.
+    # Handle per-arc custom Opp values to reverse direction.
+    if opposite:
+        orthogVector = calcOrthogonalVector(deviationVector, not clockWise)
+    else:
+        orthogVector = calcOrthogonalVector(deviationVector, clockWise)
+
+    # dev point is at the origin point + alongTrackVector + orthogVector.
+    devPointVector = np.array([orig_vert[0], orig_vert[1]]) + alongTrackVector + orthogVector
+    devMapVert = (devPointVector[0], devPointVector[1])
+
+    return devMapVert
+
+def plot_flow_arc(orig_vert, dest_vert, dev_vert, verts_per_arc, layer_definition, arc_job, given_field_names):
+
+    # Translate all points by negative vector of orig_vert, so orig_vert lies on the origin.
+    orgV = np.array([orig_vert[0], orig_vert[1]])
+    devV = np.array([dev_vert[0], dev_vert[1]])
+    desV = np.array([dest_vert[0], dest_vert[1]])
+    orgV_shft = np.array([0.0, 0.0]) # orgV_shft minus itself.
+    devV_shft = devV - orgV
+    desV_shft = desV - orgV
+    devPt = Point(devV_shft[0], devV_shft[1]) # Shapely Point object.
+    desPt = Point(desV_shft[0], desV_shft[1]) # Shapely Point object.
+    # Determine angle necessary to rotate desV_shft so it lies on the x axis.
+    # The origin vertex obviously doesn't change, but the other two do.
+    # Angle of rotation necessary is given in radians by math.atan2(y2-y1, x2-x1).
+    # Thanks to Jim Lewis: http://stackoverflow.com/questions/2676719/calculating-the-angle-between-the-line-defined-by-two-points
+    theta_desV_shift = math.atan2( desV_shft[1] , desV_shft[0] ) # Returned in radians.
+    angleToRotateBy = -1.0 * theta_desV_shift
+    # Rotate both the dev point and the destination point by this angle.
+    orgV_shft_rot = orgV_shft # Origin unchanged.
+    devV_shft_rot = aff.rotate(devPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
+    desV_shft_rot = aff.rotate(desPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
+    # Restate each point as a simple tuple.
+    orgV_shft_rot_tuple = (0.0, 0.0)
+    devV_shft_rot_tuple = (devV_shft_rot.x, devV_shft_rot.y)
+    desV_shft_rot_tuple = (desV_shft_rot.x, desV_shft_rot.y)
+    # We've got the three necessary vertices to construct an interpolator, now in strictly increasing x order.
+    interpoVerts = [orgV_shft_rot_tuple, devV_shft_rot_tuple, desV_shft_rot_tuple]
+    #
+    # Just a sanity check...
+    if not strictly_increasing([ orgV_shft_rot_tuple[0], devV_shft_rot_tuple[0], desV_shft_rot_tuple[0] ]):
+        print("X values for this interpolation are not strictly increasing!")
+    # The interpolator:
+    series_x = [i[0] for i in interpoVerts]
+    series_y = [i[1] for i in interpoVerts]
+    thisInterpolator = generateInterpolator(series_x, series_y, interpolator)
+
+    # Determine how many vertices each arc should have, using user-specified vertsPerArc,
+    # over the range defined by the destination x - the origin x.
+    xRange = series_x[2] - series_x[0]
+    anInterval = xRange / verts_per_arc
+    # xValues = np.linspace(series_x[0], series_x[2], num=anInterval, endpoint=True) # works, but slower by far than np.append()
+    xValues = np.append(np.arange(series_x[0], series_x[2], anInterval), series_x[2])
+    # NB: This leaves the dev point behind! We should have many others near it though,
+    # or it could be inserted into the sequence here.
+    #
+    # Add final (rotated and translated) destination x value to xValues.
+    np.append(xValues, desV_shft_rot_tuple[0])
+    # Evaluate interpolants by thisInterpolator([xValues]), store vertices as tuples (x,y).
+    yValues = thisInterpolator(xValues)
+    # Build list of verts with origin at beginning, then interpolated ones, then destination.
+    vertsInterpolated = [ (x,y) for x,y in zip(xValues, yValues) ]
+    # Now rotate these points back...
+    rerotatedPoints = []
+    for vi in vertsInterpolated:
+        aVert = Point(vi[0], vi[1]) # Shapely Point object.
+        aRerotatedPoint = aff.rotate(aVert, theta_desV_shift, origin=(0.0, 0.0), use_radians=True)
+        rerotatedPoints.append(aRerotatedPoint)
+    # ...and now translate the rerotated points back to projected map coordinates.
+    rectifiedPoints = []
+    for rrp in rerotatedPoints:
+        rrpV = np.array([rrp.x, rrp.y])
+        rectV = rrpV + orgV
+        aPoint = (rectV[0], rectV[1])
+        rectifiedPoints.append(aPoint)
+    # Finally, build a line with this list of vertices, carrying over attributes,
+    # and write to file.
+    anArc = ogr.Feature(layer_definition)
+    if given_field_names:
+        for fld in given_field_names:
+            anArc.SetField(fld, arc_job[fld])
+    lineGeometry = createLineString(rectifiedPoints) # actually create the line
+    anArc.SetGeometry(lineGeometry)
+    #dst_layer.CreateFeature(anArc)
+    #anArc = None # Free resources, finish this route.
+
+    return anArc
+
+
 
 
 
@@ -338,7 +454,7 @@ def main(
     # Identify which fields are present beyond those that are required.
     givenFieldNames = None 
     with open(routes) as csvfile:
-        dReader = csv.DictReader(csvfile, delimiter = ',', quotechar = '"')
+        dReader = csv.DictReader(csvfile, delimiter=',', quotechar='"')
         givenFieldNames = dReader.fieldnames
     otherFieldnames = [e for e in givenFieldNames if e not in requiredFieldNames]
 
@@ -348,7 +464,7 @@ def main(
     driver = ogr.GetDriverByName(ogrDriverName)
     dst_ds = driver.CreateDataSource(output_file)
     fName = os.path.splitext(os.path.split(output_file)[1])[0]
-    dst_layer = dst_ds.CreateLayer(fName, outSR, geom_type = ogr.wkbLineString)
+    dst_layer = dst_ds.CreateLayer(fName, outSR, geom_type=ogr.wkbLineString)
     layer_defn = dst_layer.GetLayerDefn()
     for field in requiredTextFieldNames:
         createAField(dst_layer, field, ogr.OFTString)
@@ -362,7 +478,7 @@ def main(
     if be_verbose:
         print("Reading input .csv file...")
     with open(routes) as csvfile:
-        dReader = csv.DictReader(csvfile, delimiter = ',', quotechar = '"')
+        dReader = csv.DictReader(csvfile, delimiter=',', quotechar='"')
         # Reference fields by their headers; first row taken for headers by default.
         # Find every unique origin point, and separate arcs into groups by origin point,
         # stored in a dictionary.
@@ -410,116 +526,26 @@ def main(
                 origMapVert = (xOrigOut, yOrigOut)
                 destMapVert = (xDestOut, yDestOut)
 
-                ## Find the "dev" point for defining an interpolator, using vector geometry.
+                ### Find the "dev" point for defining an interpolator, using vector geometry.
+                devMapVert = plot_dev_point(
+                                origMapVert,
+                                destMapVert,
+                                a["SegFract"],
+                                a["Dev"],
+                                a["Straight"],
+                                a["Opp"]
+                )
 
-                # Straight-line route as a vector starting at coord system origin is second vertex minus first.
-                routeVector = np.array([destMapVert[0], destMapVert[1]]) - np.array([origMapVert[0], origMapVert[1]])
-
-                # Get along-track fraction of line as vector.
-                # Handle per-arc custom SegmentFraction values.
-                if a["SegFract"]:
-                    alongTrackVector = routeVector * float(a["SegFract"])
-                else:
-                    alongTrackVector = routeVector * alongSegmentFraction
-
-                # The user-set fraction of the arc distance for point dev.
-                # Handle per-arc custom Deviation values.
-                if a["Dev"]:
-                    deviationVector = routeVector * float(a["Dev"])
-                else:
-                    deviationVector = routeVector * devFraction
-
-                # Handle per-arc Straight values. Override the deviationVector.
-                if a["Straight"]:
-                    deviationVector = routeVector * 0.0
-
-                # Get the left-handed orthogonal vector of this.
-                # Handle per-arc custom Opp values to reverse direction.
-                if a["Opp"]:
-                    orthogVector = calcOrthogonalVector(deviationVector, not clockWise)
-                else:
-                    orthogVector = calcOrthogonalVector(deviationVector, clockWise)
-
-                # dev point is at the origin point + alongTrackVector + orthogVector.
-                devPointVector = np.array([origMapVert[0], origMapVert[1]]) + alongTrackVector + orthogVector
-                devMapVert = (devPointVector[0], devPointVector[1])
-
-                # Now determine the interpolator going through the origin, the dev point, and the destination.
-                # NB: Usually, for the SciPy functions we use, the x values must be a strictly monotonic,
-                # increasing series. To handle all cases, we will translate all three points equally so that the
-                # origin point lies on the coordinate system origin, and rotate all points counterclockwise so
-                # that the origin and destination y values are both 0. This will ensure the three x values are
-                # monotonic, increasing in sequence.
-
-                # Translate all points by negative vector of origMapVert, so origMapVert lies on the origin.
-                orgV = np.array([origMapVert[0], origMapVert[1]])
-                devV = np.array([devMapVert[0], devMapVert[1]])
-                desV = np.array([destMapVert[0], destMapVert[1]])
-                orgV_shft = np.array([0.0, 0.0]) # orgV_shft minus itself.
-                devV_shft = devV - orgV
-                desV_shft = desV - orgV
-                devPt = Point(devV_shft[0], devV_shft[1]) # Shapely Point object.
-                desPt = Point(desV_shft[0], desV_shft[1]) # Shapely Point object.
-                # Determine angle necessary to rotate desV_shft so it lies on the x axis.
-                # The origin vertex obviously doesn't change, but the other two do.
-                # Angle of rotation necessary is given in radians by math.atan2(y2-y1, x2-x1).
-                # Thanks to Jim Lewis: http://stackoverflow.com/questions/2676719/calculating-the-angle-between-the-line-defined-by-two-points
-                theta_desV_shift = math.atan2( desV_shft[1] , desV_shft[0] ) # Returned in radians.
-                angleToRotateBy = -1.0 * theta_desV_shift
-                # Rotate both the dev point and the destination point by this angle.
-                orgV_shft_rot = orgV_shft # Origin unchanged.
-                devV_shft_rot = aff.rotate(devPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
-                desV_shft_rot = aff.rotate(desPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
-                # Restate each point as a simple tuple.
-                orgV_shft_rot_tuple = (0.0, 0.0)
-                devV_shft_rot_tuple = (devV_shft_rot.x, devV_shft_rot.y)
-                desV_shft_rot_tuple = (desV_shft_rot.x, desV_shft_rot.y)
-                # We've got the three necessary vertices to construct an interpolator, now in strictly increasing x order.
-                interpoVerts = [orgV_shft_rot_tuple, devV_shft_rot_tuple, desV_shft_rot_tuple]
-                #
-                # Just a sanity check...
-                if not strictly_increasing([ orgV_shft_rot_tuple[0], devV_shft_rot_tuple[0], desV_shft_rot_tuple[0] ]):
-                    print("X values for this interpolation are not strictly increasing!")
-                # The interpolator:
-                series_x = [i[0] for i in interpoVerts]
-                series_y = [i[1] for i in interpoVerts]
-                thisInterpolator = generateInterpolator(series_x, series_y, interpolator)
-
-                # Determine how many vertices each arc should have, using user-specified vertsPerArc,
-                # over the range defined by the destination x - the origin x.
-                xRange = series_x[2] - series_x[0]
-                anInterval = xRange / vertsPerArc
-                # xValues = np.linspace(series_x[0], series_x[2], num=anInterval, endpoint=True) # works, but slower by far than np.append()
-                xValues = np.append(np.arange(series_x[0], series_x[2], anInterval), series_x[2])
-                # NB: This leaves the dev point behind! We should have many others near it though,
-                # or it could be inserted into the sequence here.
-                #
-                # Add final (rotated and translated) destination x value to xValues.
-                np.append(xValues, desV_shft_rot_tuple[0])
-                # Evaluate interpolants by thisInterpolator([xValues]), store vertices as tuples (x,y).
-                yValues = thisInterpolator(xValues)
-                # Build list of verts with origin at beginning, then interpolated ones, then destination.
-                vertsInterpolated = [ (x,y) for x,y in zip(xValues, yValues) ]
-                # Now rotate these points back...
-                rerotatedPoints = []
-                for vi in vertsInterpolated:
-                    aVert = Point(vi[0], vi[1]) # Shapely Point object.
-                    aRerotatedPoint = aff.rotate(aVert, theta_desV_shift, origin = (0.0, 0.0), use_radians = True)
-                    rerotatedPoints.append(aRerotatedPoint)
-                # ...and now translate the rerotated points back to projected map coordinates.
-                rectifiedPoints = []
-                for rrp in rerotatedPoints:
-                    rrpV = np.array([rrp.x, rrp.y])
-                    rectV = rrpV + orgV
-                    aPoint = (rectV[0], rectV[1])
-                    rectifiedPoints.append(aPoint)
-                # Finally, build a line with this list of vertices, carrying over attributes,
-                # and write to file.
-                anArc = ogr.Feature(layer_defn)
-                for fld in givenFieldNames:
-                    anArc.SetField(fld, a[fld])
-                lineGeometry = createLineString(rectifiedPoints) # actually create the line
-                anArc.SetGeometry(lineGeometry)
+                ## Translate all points by negative vector of origMapVert, so origMapVert lies on the origin.
+                anArc = plot_flow_arc(
+                                origMapVert,
+                                destMapVert,
+                                devMapVert,
+                                vertsPerArc,
+                                layer_defn,
+                                a,
+                                givenFieldNames
+                )
                 dst_layer.CreateFeature(anArc)
                 anArc = None # Free resources, finish this route.
 
@@ -528,6 +554,10 @@ def main(
     dst_ds = None # Destroy the data source to free resouces and finish writing.
 
     print("Finished, output written to: " + output_file)
+
+
+
+
 
 
 # Main module check, command line arguments /////////////////////////////////////////
