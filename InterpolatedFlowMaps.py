@@ -281,7 +281,7 @@ def plot_dev_point(orig_vert, dest_vert, seg_fract, dev, straight, opposite):
 
     return devMapVert
 
-def plot_flow_arc(orig_vert, dest_vert, dev_vert, verts_per_arc, layer_definition, arc_job, given_field_names):
+def plot_flow_arc(orig_vert, dest_vert, dev_vert, verts_per_arc):
 
     # Translate all points by negative vector of orig_vert, so orig_vert lies on the origin.
     orgV = np.array([orig_vert[0], orig_vert[1]])
@@ -345,18 +345,9 @@ def plot_flow_arc(orig_vert, dest_vert, dev_vert, verts_per_arc, layer_definitio
         rectV = rrpV + orgV
         aPoint = (rectV[0], rectV[1])
         rectifiedPoints.append(aPoint)
-    # Finally, build a line with this list of vertices, carrying over attributes,
-    # and write to file.
-    anArc = ogr.Feature(layer_definition)
-    if given_field_names:
-        for fld in given_field_names:
-            anArc.SetField(fld, arc_job[fld])
-    lineGeometry = createLineString(rectifiedPoints) # actually create the line
-    anArc.SetGeometry(lineGeometry)
-    #dst_layer.CreateFeature(anArc)
-    #anArc = None # Free resources, finish this route.
 
-    return anArc
+    return rectifiedPoints # A sequenced list of vertices.
+
 
 
 
@@ -537,15 +528,20 @@ def main(
                 )
 
                 ## Translate all points by negative vector of origMapVert, so origMapVert lies on the origin.
-                anArc = plot_flow_arc(
+                rectified_points = plot_flow_arc(
                                 origMapVert,
                                 destMapVert,
                                 devMapVert,
-                                vertsPerArc,
-                                layer_defn,
-                                a,
-                                givenFieldNames
+                                vertsPerArc
                 )
+
+                # Finally, build a line with this list of vertices, carrying over attributes,
+                # and write to file.
+                anArc = ogr.Feature(layer_defn)
+                for fld in givenFieldNames:
+                    anArc.SetField(fld, a[fld])
+                lineGeometry = createLineString(rectified_points) # actually create the line
+                anArc.SetGeometry(lineGeometry)
                 dst_layer.CreateFeature(anArc)
                 anArc = None # Free resources, finish this route.
 
