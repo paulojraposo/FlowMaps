@@ -281,7 +281,7 @@ def plot_dev_point(orig_vert, dest_vert, seg_fract, dev, straight, opposite):
 
     return devMapVert
 
-def plot_flow_arc(orig_vert, dest_vert, dev_vert, verts_per_arc):
+def plot_curving_arc(orig_vert, dest_vert, dev_vert, verts_per_arc):
 
     # Translate all points by negative vector of orig_vert, so orig_vert lies on the origin.
     orgV = np.array([orig_vert[0], orig_vert[1]])
@@ -300,8 +300,8 @@ def plot_flow_arc(orig_vert, dest_vert, dev_vert, verts_per_arc):
     angleToRotateBy = -1.0 * theta_desV_shift
     # Rotate both the dev point and the destination point by this angle.
     orgV_shft_rot = orgV_shft # Origin unchanged.
-    devV_shft_rot = aff.rotate(devPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
-    desV_shft_rot = aff.rotate(desPt, angleToRotateBy, origin = (0.0, 0.0), use_radians = True)
+    devV_shft_rot = aff.rotate(devPt, angleToRotateBy, origin=(0.0, 0.0), use_radians=True)
+    desV_shft_rot = aff.rotate(desPt, angleToRotateBy, origin=(0.0, 0.0), use_radians=True)
     # Restate each point as a simple tuple.
     orgV_shft_rot_tuple = (0.0, 0.0)
     devV_shft_rot_tuple = (devV_shft_rot.x, devV_shft_rot.y)
@@ -528,7 +528,7 @@ def main(
                 )
 
                 ## Translate all points by negative vector of origMapVert, so origMapVert lies on the origin.
-                rectified_points = plot_flow_arc(
+                rectified_points = plot_curving_arc(
                                 origMapVert,
                                 destMapVert,
                                 devMapVert,
