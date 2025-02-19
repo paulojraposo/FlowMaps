@@ -96,13 +96,13 @@ epsgWGS84Proj4 = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
 # wgs84SR = osr.SpatialReference()
 # wgs84SR.ImportFromProj4(epsgWGS84Proj4)
 
-# EPSG:3785 Web Mercator
+# EPSG:3785 Web Mercator.
 webMercatorRefURL = "https://spatialreference.org/ref/epsg/3785/" # Retrieved string below on 2017-06-01
 epsgWebMercProj4 = "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378137 +b=6378137 +towgs84=0,0,0,0,0,0,0 +no_defs" # manually removed +units=m
 # wmSR = osr.SpatialReference()
 # wmSR.ImportFromProj4(epsgWebMercProj4)
 
-# Required field names
+# Required field names.
 requiredTextFieldNames = ["OrigName", "DestName"]
 requiredFloatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon", "Dev", "SegFract", "Opp", "Straight"]
 requiredFieldNames = requiredTextFieldNames + requiredFloatFieldNames
@@ -149,6 +149,7 @@ def calcOrthogonalVector(aVector, clockwise):
     else:
         return np.array([aVector[1] * -1.0, aVector[0]])
 
+
 def calcAlongSegmentCoords(xy1, xy2, asf):
     """Given the endpoints of a line segment, and an 'along-segment fraction,'
     returns the coordinates of the midpoint by calculating simple x and y
@@ -158,6 +159,7 @@ def calcAlongSegmentCoords(xy1, xy2, asf):
     yMid = float(xy1[1]) + (asf * ydiff)
     xMid = float(xy1[0]) + (asf * xdiff)
     return (xMid, yMid)
+
 
 def generateInterpolator(xSeries, ySeries, aType):
     """Given an x and y series (assumed to be in sync with each other!),
@@ -176,6 +178,7 @@ def generateInterpolator(xSeries, ySeries, aType):
         i =  interpo(xSeries, ySeries)
     return i
 
+
 def createLineString(xyList):
     """Creates an ORG LineString geometry, given a sequenced list of
     vertices, being tuples of format (x,y)."""
@@ -184,10 +187,12 @@ def createLineString(xyList):
         line.AddPoint(v[0], v[1]) # x then y
     return line
 
+
 def createAField(dstLayer, fieldName, fieldType):
     """Simple field maker for this script."""
     new_field = ogr.FieldDefn(fieldName, fieldType)
     dstLayer.CreateField(new_field)
+
 
 def strictly_increasing(L):
     """Checks strict increasing monotonicity of a list of numbers.
@@ -195,21 +200,23 @@ def strictly_increasing(L):
     # With thanks to "6502": http://stackoverflow.com/questions/4983258/python-how-to-check-list-monotonicity
     return all(x<y for x, y in zip(L, L[1:]))
 
+
 def gdal_error_handler(err_class, err_num, err_msg):
     # https://pcjericks.github.io/py-gdalogr-cookbook/gdal_general.html#install-gdal-ogr-error-handler
     # https://trac.osgeo.org/gdal/wiki/PythonGotchas#Gotchasthatarebydesign...orperhistory
     errtype = {
-            gdal.CE_None:'None',
-            gdal.CE_Debug:'Debug',
-            gdal.CE_Warning:'Warning',
-            gdal.CE_Failure:'Failure',
-            gdal.CE_Fatal:'Fatal'
+        gdal.CE_None:'None',
+        gdal.CE_Debug:'Debug',
+        gdal.CE_Warning:'Warning',
+        gdal.CE_Failure:'Failure',
+        gdal.CE_Fatal:'Fatal'
     }
     err_msg = err_msg.replace('\n',' ')
     err_class = errtype.get(err_class, 'None')
     print('Error Number: %s' % (err_num))
     print('Error Type: %s' % (err_class))
     print('Error Message: %s' % (err_msg))
+
 
 def filterProj4String(p4string):
     """
@@ -243,9 +250,13 @@ def filterProj4String(p4string):
     print(f"String returned: {outstring}")
     return outstring
 
+
 def plot_dev_point(orig_vert, dest_vert, seg_fract, dev, straight, opposite):
 
-    ## Find the "dev" point for defining an interpolator, using vector geometry.
+    """
+    Finds the "dev" point for a flow arc, given parameters for where it
+    should be. Returns a single vertex (a tuple of two numbers).
+    """
 
     # Straight-line route as a vector starting at coord system origin is second vertex minus first.
     routeVector = np.array([dest_vert[0], dest_vert[1]]) - np.array([orig_vert[0], orig_vert[1]])
@@ -281,7 +292,16 @@ def plot_dev_point(orig_vert, dest_vert, seg_fract, dev, straight, opposite):
 
     return devMapVert
 
+
 def plot_curving_arc(orig_vert, dest_vert, dev_vert, verts_per_arc):
+
+    """
+    Accepting start, deviation, and end points, and a number of vertices,
+    does the work of plotting a many-vertex curve, including performing
+    geometric rotations as necessary to use interpolation that requires
+    strictly-increasing x-values. Returns a sequenced list of vertices
+    representing the flow arc line.
+    """
 
     # Translate all points by negative vector of orig_vert, so orig_vert lies on the origin.
     orgV = np.array([orig_vert[0], orig_vert[1]])
@@ -383,7 +403,7 @@ def main(
     # gr = 0.25 / 1.618 # For the Golden Ratio, phi.
 
 
-    # Set up error handler for GDAL
+    # Set up error handler for GDAL.
     gdal.PushErrorHandler(gdal_error_handler)
 
     # Set variables, do various checks on input arguments.
@@ -441,7 +461,7 @@ def main(
     outSR = osr.SpatialReference()
     outSR.ImportFromProj4(outP4)
 
-    # Open and read the input CSV to get all its fields. 
+    # Open and read the input CSV to get all its fields.
     # Identify which fields are present beyond those that are required.
     givenFieldNames = None 
     with open(routes) as csvfile:
@@ -481,7 +501,7 @@ def main(
         for row in dReader: # Populate originGroups.
 
             thisOrigin = (float(row["OrigLat"]), float(row["OrigLon"]))
-            
+
             if thisOrigin not in originGroups: # Make new dictionary entry if new.
                 originGroups[thisOrigin] = []
                 originKeys.append(thisOrigin)
@@ -492,7 +512,7 @@ def main(
 
         if be_verbose:
             print(f"{flow_rows} rows of flow data read in the .csv file.")
-        
+
         iteration = 1
 
         for ok in originKeys:
@@ -508,7 +528,7 @@ def main(
                     )
 
                 originLatLon = ok # lat, lon
-                destinLatLon = (float(a["DestLat"]), float(a["DestLon"])) # lat, lon
+                destinLatLon = (float(a["DestLat"]), float(a["DestLon"])) # lat, lon.
 
                 # Convert these lat lon pairs to x,y in the outbound projected coordinate system, using pyproj.
                 xOrigOut, yOrigOut = pOut(originLatLon[1], originLatLon[0])
@@ -517,7 +537,7 @@ def main(
                 origMapVert = (xOrigOut, yOrigOut)
                 destMapVert = (xDestOut, yDestOut)
 
-                ### Find the "dev" point for defining an interpolator, using vector geometry.
+                # Find the "dev" point for defining an interpolator, using vector geometry.
                 devMapVert = plot_dev_point(
                                 origMapVert,
                                 destMapVert,
@@ -527,7 +547,7 @@ def main(
                                 a["Opp"]
                 )
 
-                ## Translate all points by negative vector of origMapVert, so origMapVert lies on the origin.
+                # Translate all points by negative vector of origMapVert, so origMapVert lies on the origin.
                 rectified_points = plot_curving_arc(
                                 origMapVert,
                                 destMapVert,
@@ -540,7 +560,7 @@ def main(
                 anArc = ogr.Feature(layer_defn)
                 for fld in givenFieldNames:
                     anArc.SetField(fld, a[fld])
-                lineGeometry = createLineString(rectified_points) # actually create the line
+                lineGeometry = createLineString(rectified_points) # Actually create the line.
                 anArc.SetGeometry(lineGeometry)
                 dst_layer.CreateFeature(anArc)
                 anArc = None # Free resources, finish this route.
@@ -559,7 +579,7 @@ def main(
 # Main module check, command line arguments /////////////////////////////////////////
 
 if __name__ == '__main__':
-    
+
     # Usage messages, and parse command line arguments.
     descString = f"{progName}. A script for making flow maps in GIS, using interpolated paths. By Paulo Raposo (pauloj.raposo@outlook.com).\n\nDependencies include: {dependencies}."
     parser = argparse.ArgumentParser(
@@ -635,7 +655,7 @@ if __name__ == '__main__':
         action="version", 
         version=f"%(prog)s {__version__}."
     )
-    
+
     args = parser.parse_args()
 
     main(
