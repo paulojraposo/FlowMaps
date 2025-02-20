@@ -83,6 +83,7 @@ import argparse
 import math
 from urllib import request
 import numpy as np
+import bisect
 # import datetime
 # import logging
 
@@ -343,8 +344,18 @@ def plot_curving_arc(orig_vert, dest_vert, dev_vert, verts_per_arc):
     anInterval = xRange / verts_per_arc
     # xValues = np.linspace(series_x[0], series_x[2], num=anInterval, endpoint=True) # works, but slower by far than np.append()
     xValues = np.append(np.arange(series_x[0], series_x[2], anInterval), series_x[2])
-    # NB: This leaves the dev point behind! We should have many others near it though,
-    # or it could be inserted into the sequence here.
+    # NB: This leaves the dev point is not itself in xValues yet.
+    # Replace vertex nearest to the (rotated and translated) dev x value with the
+    # dev x value, so the deviation point will now be in the line with a y value.
+    # Also take note of it's index value in the full array.
+    #print(f"devV_shft_rot_tuple x value is {devV_shft_rot_tuple[0]}")
+    i_x_point_to_replace = find_nearest_in_list(xValues, devV_shft_rot_tuple[0])
+    xValues[i_x_point_to_replace] = devV_shft_rot_tuple[0]
+    #print(f"xValues: {xValues}")
+    index_of_dev_point = np.where(xValues == devV_shft_rot_tuple[0])
+    #print(f"Index of dev point is {index_of_dev_point}")
+
+
     #
     # Add final (rotated and translated) destination x value to xValues.
     np.append(xValues, desV_shft_rot_tuple[0])
@@ -366,7 +377,44 @@ def plot_curving_arc(orig_vert, dest_vert, dev_vert, verts_per_arc):
         aPoint = (rectV[0], rectV[1])
         rectifiedPoints.append(aPoint)
 
-    return rectifiedPoints # A sequenced list of vertices.
+    return rectifiedPoints, index_of_dev_point # A sequenced list of vertices and an int.
+
+
+def find_nearest_in_list(a_list, value):
+    """
+    Given a list and a value, returns the index of the value in the list
+    that is numerically closest to the given value.
+    https://stackoverflow.com/questions/2566412/find-nearest-value-in-numpy-array/2566508#2566508
+    """
+    array = np.asarray(a_list);
+    idx = (np.abs(array - value)).argmin();
+    return idx;
+
+
+#def build_arrow(
+    #spine_point_sequence,
+    #dev_point,
+    #w_scalar=2.0,
+    #mag_value=10,
+    #head_length=0.1):
+
+    #"""
+    #Accepting a list of vertices (as x,y tuples), this builds an arrow polygon
+    #around them.
+    #"""
+
+    ## Find index of start, end, deviation, and arrow head base points along the spine.
+
+    #spine_start_vert_i     = spine_point_sequence[0]
+    #spine_end_vert_i       = spine_point_sequence[len(spine_point_sequence) - 1]
+    #spine_head_base_vert_i = (1.0 - head_length) * int(len(spine_point_sequence) - 1) + 0.5) # https://stackoverflow.com/questions/26070514/how-do-i-get-the-index-of-a-specific-percentile-in-numpy-scipy
+    #just_x_coords_spine = [i[0] for i in spine_point_sequence]
+    #index_of_closest = find_nearest_in_list(just_x_coords_spine, dev_point[0])
+    #spine_dev_vert_i       = spine_point_sequence[index_of_closest]
+
+
+    #arrow_polygon = None
+    #return arrow_polygon
 
 
 
@@ -539,21 +587,24 @@ def main(
 
                 # Find the "dev" point for defining an interpolator, using vector geometry.
                 devMapVert = plot_dev_point(
-                                origMapVert,
-                                destMapVert,
-                                a["SegFract"],
-                                a["Dev"],
-                                a["Straight"],
-                                a["Opp"]
+                    origMapVert,
+                    destMapVert,
+                    a["SegFract"],
+                    a["Dev"],
+                    a["Straight"],
+                    a["Opp"]
                 )
 
                 # Translate all points by negative vector of origMapVert, so origMapVert lies on the origin.
-                rectified_points = plot_curving_arc(
-                                origMapVert,
-                                destMapVert,
-                                devMapVert,
-                                vertsPerArc
+                rectified_points, dev_point_index = plot_curving_arc(
+                    origMapVert,
+                    destMapVert,
+                    devMapVert,
+                    vertsPerArc
                 )
+
+                # TODO: Build polygon arrows from the rectified_points line and other parameters.
+                # use dev_point_index here, passed to build_arrow()
 
                 # Finally, build a line with this list of vertices, carrying over attributes,
                 # and write to file.
