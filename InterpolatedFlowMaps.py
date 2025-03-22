@@ -37,7 +37,7 @@ pauloj.raposo@outlook.com. Thanks for your interest!
 dependencies = """Python 3, scipy, gdal, shapely, pyproj (Proj.4)"""
 
 progName = "Interpolated Flow Maps"
-__version__ = "3.0, February 2025"
+__version__ = "4.0, March 2025"
 
 
 
@@ -71,6 +71,7 @@ try:
     import shapely.affinity as aff
     import shapely.geometry
     from shapely.geometry import Point
+    from shapely.geometry import Polygon
 except ImportError:
     print("""This script depends on the shapely library, version 1.5.17.post1 or
     greater, which isn't installed in this Python environment. Please install
@@ -91,6 +92,7 @@ import bisect
 
 # Constants, defaults, etc. /////////////////////////////////////////////////////
 
+# TODO: Update coordinate system handling, as Proj4 is deprecated.
 # EPSG:4326 WGS 84 - for required input.
 wgs84RefURL = "https://spatialreference.org/ref/epsg/4326/" # Retrieved string below on 2017-06-01
 epsgWGS84Proj4 = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
@@ -105,7 +107,7 @@ epsgWebMercProj4 = "+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +a=6378137 +b=6378137
 
 # Required field names.
 requiredTextFieldNames = ["OrigName", "DestName"]
-requiredFloatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon", "Dev", "SegFract", "Opp", "Straight"]
+requiredFloatFieldNames = ["FlowMag", "OrigLat", "OrigLon", "DestLat", "DestLon", "SegFract", "Dev", "Straight", "Opp"]
 requiredFieldNames = requiredTextFieldNames + requiredFloatFieldNames
 
 # The acceptable values for interpolator types as code and SciPy method pairs.
@@ -129,6 +131,7 @@ typesAndDrivers = {
 
 # Various default values
 outP4 = epsgWGS84Proj4
+mag_scaling_factor = 1.0
 interpolator = "cs"
 alongSegmentFraction = 0.5
 devFraction = 0.15
@@ -149,6 +152,15 @@ def calcOrthogonalVector(aVector, clockwise):
         return np.array([aVector[1], aVector[0] * -1.0])
     else:
         return np.array([aVector[1] * -1.0, aVector[0]])
+
+
+def normalize_vector(vector):
+    """Get a unit vector from a given vector. Taken with thanks from
+    https://www.delftstack.com/howto/numpy/python-numpy-unit-vector/"""
+    norm = np.linalg.norm(vector)
+    if norm == 0: 
+        return vector
+    return vector / norm
 
 
 def calcAlongSegmentCoords(xy1, xy2, asf):
@@ -187,6 +199,23 @@ def createLineString(xyList):
     for v in xyList:
         line.AddPoint(v[0], v[1]) # x then y
     return line
+
+
+def createLinearRing(xyList):
+    """Creates an OGR LinearRing geometry, given a sequenced list of
+    vertices, being typles of format (x,y). Give the last vertex as
+    coincident with the first."""
+    ring = ogr.Geometry(ogr.wkbLinearRing)
+    for v in xyList:
+        ring.AddPoint(v[0], v[1]) # x then y
+    return ring
+
+
+def createPolygon(aRing):
+    """Creates an OGR Polygon, given an OGR wkbLinearRing.."""
+    polygon = ogr.Geometry(ogr.wkbPolygon)
+    polygon.AddGeometry(aRing)
+    return polygon
 
 
 def createAField(dstLayer, fieldName, fieldType):
@@ -348,15 +377,16 @@ def plot_curving_arc(orig_vert, dest_vert, dev_vert, verts_per_arc):
     # Replace vertex nearest to the (rotated and translated) dev x value with the
     # dev x value, so the deviation point will now be in the line with a y value.
     # Also take note of it's index value in the full array.
-    #print(f"devV_shft_rot_tuple x value is {devV_shft_rot_tuple[0]}")
+    # print(f"devV_shft_rot_tuple x value is {devV_shft_rot_tuple[0]}")
     i_x_point_to_replace = find_nearest_in_list(xValues, devV_shft_rot_tuple[0])
     xValues[i_x_point_to_replace] = devV_shft_rot_tuple[0]
-    #print(f"xValues: {xValues}")
-    index_of_dev_point = np.where(xValues == devV_shft_rot_tuple[0])
-    #print(f"Index of dev point is {index_of_dev_point}")
+    # print(f"i_x_point_to_replace is {i_x_point_to_replace}")
+    # print(f"xValues: {xValues}")
+    # index_of_dev_point = int( np.where(xValues == devV_shft_rot_tuple[0])[0] ) # Unnecessary.
+    index_of_dev_point = i_x_point_to_replace
+    # print(f"index_of_dev_point is {index_of_dev_point}")
 
 
-    #
     # Add final (rotated and translated) destination x value to xValues.
     np.append(xValues, desV_shft_rot_tuple[0])
     # Evaluate interpolants by thisInterpolator([xValues]), store vertices as tuples (x,y).
@@ -391,30 +421,105 @@ def find_nearest_in_list(a_list, value):
     return idx;
 
 
-#def build_arrow(
-    #spine_point_sequence,
-    #dev_point,
-    #w_scalar=2.0,
-    #mag_value=10,
-    #head_length=0.1):
+def build_arrow(
+    spine_point_sequence, # A list containing many 2-tuples. Should start with origin and end with destination.
+    dev_point_index,      # The index in spine_point_sequence at which the deviation point is found.
+    w_scalar=2.0,         # Width scalar.
+    mag_value=10,         # Magnitude value. Hard-coded default, temporarily while developing.
+    head_length=0.1,      # Length of arrow head, expressed as a fraction of arrow length.
+    head_width=1.4        # Factor of the width of the arrow head base. Applied on both sides of the arrow,
+                          # 1.4 results in an arrow head that is 140% the width of the arrow base.
+    ):
 
-    #"""
-    #Accepting a list of vertices (as x,y tuples), this builds an arrow polygon
-    #around them.
-    #"""
+    """
+    Accepting a list of vertices (as x,y tuples), plus the point that was the deviation point
+    for this line, this returns an arrow polygon around them.
+    """
 
-    ## Find index of start, end, deviation, and arrow head base points along the spine.
+    # TODO: Make magnitudes scale unit orthogonal vectors, so that arrow widths aren't 
+    # at slightly different scales for starting from slightly different arcs.
 
-    #spine_start_vert_i     = spine_point_sequence[0]
-    #spine_end_vert_i       = spine_point_sequence[len(spine_point_sequence) - 1]
-    #spine_head_base_vert_i = (1.0 - head_length) * int(len(spine_point_sequence) - 1) + 0.5) # https://stackoverflow.com/questions/26070514/how-do-i-get-the-index-of-a-specific-percentile-in-numpy-scipy
-    #just_x_coords_spine = [i[0] for i in spine_point_sequence]
-    #index_of_closest = find_nearest_in_list(just_x_coords_spine, dev_point[0])
-    #spine_dev_vert_i       = spine_point_sequence[index_of_closest]
+    # Find index of start, end, deviation, and arrow head base points along the spine.
+    spine_start_vert_i     = 0
+    spine_end_vert_i       = len(spine_point_sequence) - 1
+    spine_head_base_vert_i = int((1.0 - head_length) * int(len(spine_point_sequence) - 1) + 0.5) # https://stackoverflow.com/questions/26070514/how-do-i-get-the-index-of-a-specific-percentile-in-numpy-scipy
+    spine_dev_vert_i       = dev_point_index
 
+    # For start, deviation, and arrow head base points, find their along-spine vector to the
+    # subsequent vertex in each case, and find both the clockwise and counter-clockwise
+    # orthogonal vectors. Points on arrow shaft borders are found by scaling the orthogonal vectors
+    # by the magnitude, and adding either of them (clockwise or counter-clockwise) to the starting
+    # vertex of the spine vector.
+    # Update: Not using this for the beginning of the arrow any longer, which will start
+    # from a point, and dev point has it's magnitude divided to half, so arrow is thickest
+    # at the arrow head, and tapers up to that from the origin point. So arrow shafts are no
+    # longer "parallel."
+    spine_start_vector = np.array(spine_point_sequence[spine_start_vert_i + 1]) - np.array(spine_point_sequence[spine_start_vert_i])
+    spine_start_vector_cw_scaled  = normalize_vector(calcOrthogonalVector(spine_start_vector, True)) * mag_value
+    spine_start_vector_ccw_scaled = normalize_vector(calcOrthogonalVector(spine_start_vector, False)) * mag_value
+    starboard_start_vert_as_array = spine_start_vector_cw_scaled  + np.array(spine_point_sequence[spine_start_vert_i])
+    port_start_vert_as_array      = spine_start_vector_ccw_scaled + np.array(spine_point_sequence[spine_start_vert_i])
+    starboard_start_vert_as_tuple = tuple(starboard_start_vert_as_array)
+    port_end_vert_as_tuple        = tuple(port_start_vert_as_array)
+    #
+    spine_dev_vector = np.array(spine_point_sequence[spine_dev_vert_i + 1]) - np.array(spine_point_sequence[spine_dev_vert_i])
+    spine_dev_vector_cw_scaled    = normalize_vector(calcOrthogonalVector(spine_dev_vector, True)) * mag_value * 0.5
+    spine_dev_vector_ccw_scaled   = normalize_vector(calcOrthogonalVector(spine_dev_vector, False)) * mag_value * 0.5
+    starboard_dev_vert_as_array   = spine_dev_vector_cw_scaled  + np.array(spine_point_sequence[spine_dev_vert_i])
+    port_dev_vert_as_array        = spine_dev_vector_ccw_scaled + np.array(spine_point_sequence[spine_dev_vert_i])
+    starboard_dev_vert_as_tuple   = tuple(starboard_dev_vert_as_array)
+    port_dev_vert_as_tuple        = tuple(port_dev_vert_as_array)
+    #
+    spine_head_base_vector = np.array(spine_point_sequence[spine_head_base_vert_i + 1]) - np.array(spine_point_sequence[spine_head_base_vert_i])
+    spine_head_base_vector_cw_scaled    = normalize_vector(calcOrthogonalVector(spine_head_base_vector, True)) * mag_value
+    spine_head_base_vector_ccw_scaled   = normalize_vector(calcOrthogonalVector(spine_head_base_vector, False)) * mag_value
+    starboard_head_base_vert_as_array   = spine_head_base_vector_cw_scaled  + np.array(spine_point_sequence[spine_head_base_vert_i])
+    port_head_base_vert_as_array        = spine_head_base_vector_ccw_scaled + np.array(spine_point_sequence[spine_head_base_vert_i])
+    starboard_head_base_vert_as_tuple   = tuple(starboard_head_base_vert_as_array)
+    port_head_base_vert_as_tuple        = tuple(port_head_base_vert_as_array)
 
-    #arrow_polygon = None
-    #return arrow_polygon
+    # Find starboard and port side arrow head width vertices using orthogonal vectors
+    # and the head base spine vertex.
+    starboard_head_width_vert_as_array = np.array(spine_point_sequence[spine_head_base_vert_i]) \
+        + (normalize_vector(calcOrthogonalVector(spine_head_base_vector, True)) * mag_value * head_width)
+    port_head_width_vert_as_array      = np.array(spine_point_sequence[spine_head_base_vert_i]) \
+        + (normalize_vector(calcOrthogonalVector(spine_head_base_vector, False)) * mag_value * head_width)
+    starboard_head_width_vert_as_tuple = tuple(starboard_head_width_vert_as_array)
+    port_head_width_vert_as_tuple      = tuple(port_head_width_vert_as_array)
+
+    # Plot points along the curving arrow shaft edges. Do sequences so polygon
+    # will be counter-clockwise constructed.
+    vert_count_for_shaft_edges = int(vertsPerArc * (1.0 - head_length)) # Reflect vertsPerArc minus the head length.
+    #
+    starboard_shaft_edge, p_dev_index = plot_curving_arc(
+        tuple(spine_point_sequence[spine_start_vert_i]),
+        starboard_head_base_vert_as_tuple,
+        starboard_dev_vert_as_tuple,
+        vert_count_for_shaft_edges
+    )
+    #
+    port_shaft_edge, s_dev_index = plot_curving_arc(
+        port_head_base_vert_as_tuple, # Reverse order to the starboard edge.
+        tuple(spine_point_sequence[spine_start_vert_i]),
+        port_dev_vert_as_tuple,
+        vert_count_for_shaft_edges
+    )
+
+    # String together all arrow points into a polygon by concatenating all the vertex lists.
+    # Make coincident final point at start point.
+    polygon_verts = [spine_point_sequence[spine_start_vert_i]] \
+        + starboard_shaft_edge \
+        + [starboard_head_width_vert_as_tuple] \
+        + [spine_point_sequence[spine_end_vert_i]] \
+        + [port_head_width_vert_as_tuple] \
+        + port_shaft_edge \
+        + [spine_point_sequence[spine_start_vert_i]]
+
+    # Create Shapely polygon from polygon_verts.
+    # arrow_polygon = Polygon(polygon_verts)
+
+    # return arrow_polygon
+    return polygon_verts
 
 
 
@@ -426,6 +531,7 @@ def find_nearest_in_list(a_list, value):
 def main(
     routes,
     output_file,
+    mag_scaling,
     out_proj4,
     interp_method,
     asf,
@@ -442,6 +548,7 @@ def main(
 
     # Various default values
     global outP4
+    global mag_scaling_factor
     global interpolator
     global alongSegmentFraction
     global devFraction
@@ -478,6 +585,8 @@ def main(
             outP4 = filterProj4String(out_proj4)
     else:
         outP4 = epsgWGS84Proj4
+    if mag_scaling:
+        mag_scaling_factor = float(mag_scaling)
     if interp_method:
         if interp_method in acceptedInterpolators.keys():
             interpolator = interp_method
@@ -509,6 +618,14 @@ def main(
     outSR = osr.SpatialReference()
     outSR.ImportFromProj4(outP4)
 
+
+    # Store arrows and paths in arrays. Later, write them out to file.
+    # Keep attributes synced with the others so we can zip() them later.
+    flow_paths  = []
+    flow_arrows = []
+    attributes  = []
+
+
     # Open and read the input CSV to get all its fields.
     # Identify which fields are present beyond those that are required.
     givenFieldNames = None 
@@ -517,20 +634,6 @@ def main(
         givenFieldNames = dReader.fieldnames
     otherFieldnames = [e for e in givenFieldNames if e not in requiredFieldNames]
 
-    # Create an output file where the user specified, and add all attribute fields to it.
-    if be_verbose:
-        print(f"Preparing {output_file} for output...")
-    driver = ogr.GetDriverByName(ogrDriverName)
-    dst_ds = driver.CreateDataSource(output_file)
-    fName = os.path.splitext(os.path.split(output_file)[1])[0]
-    dst_layer = dst_ds.CreateLayer(fName, outSR, geom_type=ogr.wkbLineString)
-    layer_defn = dst_layer.GetLayerDefn()
-    for field in requiredTextFieldNames:
-        createAField(dst_layer, field, ogr.OFTString)
-    for field in requiredFloatFieldNames:
-        createAField(dst_layer, field, ogr.OFTReal)
-    for field in otherFieldnames:
-        createAField(dst_layer, field, ogr.OFTString)
 
     # Open and read the CSV.
     # Each row is an arc/route in the flow map. Process each row into a feature.
@@ -596,31 +699,76 @@ def main(
                 )
 
                 # Translate all points by negative vector of origMapVert, so origMapVert lies on the origin.
+                # Arrive at final spine with `rectified_points`.
                 rectified_points, dev_point_index = plot_curving_arc(
                     origMapVert,
                     destMapVert,
                     devMapVert,
                     vertsPerArc
                 )
+                flow_paths.append(rectified_points)
 
-                # TODO: Build polygon arrows from the rectified_points line and other parameters.
-                # use dev_point_index here, passed to build_arrow()
+                # Build polygon arrows from the rectified_points line and other parameters.
+                scaled_mag = float(a["FlowMag"]) * mag_scaling_factor
+                this_arrow = build_arrow(rectified_points, dev_point_index, mag_value=scaled_mag)
+                flow_arrows.append(this_arrow)
 
-                # Finally, build a line with this list of vertices, carrying over attributes,
-                # and write to file.
-                anArc = ogr.Feature(layer_defn)
-                for fld in givenFieldNames:
-                    anArc.SetField(fld, a[fld])
-                lineGeometry = createLineString(rectified_points) # Actually create the line.
-                anArc.SetGeometry(lineGeometry)
-                dst_layer.CreateFeature(anArc)
-                anArc = None # Free resources, finish this route.
+                # Copy the attributes to write to file later.
+                attributes.append(a)
 
                 iteration += 1
 
-    dst_ds = None # Destroy the data source to free resouces and finish writing.
 
-    print("Finished, output written to: " + output_file)
+    # Write out arrows and lines to files. Both use the same OGR driver, and "template"
+    # names, with "_arrows" or "_lines" appended.
+    driver = ogr.GetDriverByName(ogrDriverName)
+    path, basename = os.path.split(output_file)
+    template_basename_no_ext, ext = os.path.splitext(basename)
+
+    arrow_file_name_no_ext = template_basename_no_ext + "_arrows"
+    arrow_file_full_path = os.path.join(path, arrow_file_name_no_ext + ext)
+    dst_ds = driver.CreateDataSource(arrow_file_full_path)
+    dst_layer_poly = dst_ds.CreateLayer(arrow_file_name_no_ext, outSR, geom_type=ogr.wkbPolygon)
+    layer_defn_poly = dst_layer_poly.GetLayerDefn()
+    for field in requiredTextFieldNames:
+        createAField(dst_layer_poly, field, ogr.OFTString)
+    for field in requiredFloatFieldNames:
+        createAField(dst_layer_poly, field, ogr.OFTReal)
+    for field in otherFieldnames:
+        createAField(dst_layer_poly, field, ogr.OFTString)
+    for polygon_attribute_pair in zip(flow_arrows, attributes):
+        anArrow = ogr.Feature(layer_defn_poly)
+        # Write out attributes with features to files.
+        for fld in givenFieldNames:
+            anArrow.SetField(fld, polygon_attribute_pair[1][fld])
+        polygonGeometryRing = createLinearRing(polygon_attribute_pair[0]) 
+        polygon_arrow = createPolygon(polygonGeometryRing)
+        anArrow.SetGeometry(polygon_arrow)
+        dst_layer_poly.CreateFeature(anArrow)
+        anArrow = None # Free resources, finish this route.
+
+    line_file_name_no_ext = template_basename_no_ext + "_lines"
+    line_file_full_path = os.path.join(path, line_file_name_no_ext + ext)
+
+    dst_ds = driver.CreateDataSource(line_file_full_path)
+    dst_layer_line = dst_ds.CreateLayer(line_file_name_no_ext, outSR, geom_type=ogr.wkbLineString)
+    layer_defn_line = dst_layer_line.GetLayerDefn()
+    for field in requiredTextFieldNames:
+        createAField(dst_layer_line, field, ogr.OFTString)
+    for field in requiredFloatFieldNames:
+        createAField(dst_layer_line, field, ogr.OFTReal)
+    for field in otherFieldnames:
+        createAField(dst_layer_line, field, ogr.OFTString)
+    for line_attribute_pair in zip(flow_paths, attributes):
+        aLine = ogr.Feature(layer_defn_line)
+        # Write out attributes with features to files.
+        for fld in givenFieldNames:
+            aLine.SetField(fld, line_attribute_pair[1][fld])
+        a_line_string = createLineString(line_attribute_pair[0])
+        aLine.SetGeometry(a_line_string)
+        dst_layer_line.CreateFeature(aLine)
+        aLine = None # Free resources, finish this route.
+
 
 
 
@@ -644,10 +792,19 @@ if __name__ == '__main__':
         "file for required formatting."
     )
     parser.add_argument("OUTPUTFILE", 
-        help="File path and name for output shapefile. The containing "
+        help="File path and name for output. The containing "
         "directory must already exist. The file format is determined "
         "from the extension given here, with these options: .shp, .kml, "
-        ".gml, .gmt, or .geojson."
+        ".gml, .gmt, or .geojson. A file is made for each of lines "
+        "and arrow polygons, with '_lines' or '_arrows' appended to the"
+        "name, respectively."
+    )
+    parser.add_argument("-ms", "--magscale",
+        help="Factor by which to scale magnitude values with respect to "
+        "output coordinate system units (which are often meters). Use to "
+        "globally increase or decrease polygon arrow width. Give as a real "
+        "number such as 0.01 or 100.0. Doesnot affect lines or attribute "
+        "values, only arrow polygon widths."
     )
     parser.add_argument("--outproj4", 
         help="Output projected coordinate system to draw flow arcs in, "
@@ -712,6 +869,7 @@ if __name__ == '__main__':
     main(
         args.ROUTES,
         args.OUTPUTFILE,
+        args.magscale,
         args.outproj4,
         args.interpolator,
         args.segfract,
