@@ -796,7 +796,7 @@ if __name__ == '__main__':
         "directory must already exist. The file format is determined "
         "from the extension given here, with these options: .shp, .kml, "
         ".gml, .gmt, or .geojson. A file is made for each of lines "
-        "and arrow polygons, with '_lines' or '_arrows' appended to the"
+        "and arrow polygons, with '_lines' or '_arrows' appended to the "
         "name, respectively."
     )
     parser.add_argument("-ms", "--magscale",
@@ -804,7 +804,8 @@ if __name__ == '__main__':
         "output coordinate system units (which are often meters). Use to "
         "globally increase or decrease polygon arrow width. Give as a real "
         "number such as 0.01 or 100.0. Does not affect lines or attribute "
-        "values, only arrow polygon widths. Default value is 1.0."
+        "values, only arrow polygon widths. The default value is "
+        f"{str(mag_scaling_factor)}."
     )
     parser.add_argument("--outproj4", 
         help="Output projected coordinate system to draw flow arcs in, "
@@ -839,13 +840,13 @@ if __name__ == '__main__':
         default=False, 
         action="store_true", 
         help="Draw straight flow lines. Equivalent to setting --dev to 0.0 "
-        "and leaving --asf at default. Will cause any settings to those "
+        "and leaving --sf at default. Will cause any settings to those "
         "variables to be overruled."
     )
     parser.add_argument("-v", "--vpa", 
         help="The number of vertices the mapped arcs should each have. "
         "Must be greater than 3, but typically should be at least several "
-        f"dozen to a few hundred or so. Default is {str(vertsPerArc)}."
+        f"dozen to a few hundred or so. The default is {str(vertsPerArc)}."
     )
     parser.add_argument("--ccw", 
         default=False, 
