@@ -803,8 +803,8 @@ if __name__ == '__main__':
         help="Factor by which to scale magnitude values with respect to "
         "output coordinate system units (which are often meters). Use to "
         "globally increase or decrease polygon arrow width. Give as a real "
-        "number such as 0.01 or 100.0. Doesnot affect lines or attribute "
-        "values, only arrow polygon widths."
+        "number such as 0.01 or 100.0. Does not affect lines or attribute "
+        "values, only arrow polygon widths. Default value is 1.0."
     )
     parser.add_argument("--outproj4", 
         help="Output projected coordinate system to draw flow arcs in, "
